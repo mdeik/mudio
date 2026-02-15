@@ -1,0 +1,46 @@
+[project]
+name = "mudio"
+version = "1.0.0"
+description = "Friendly command-line music-metadata editor and Python library"
+authors = [{name = "Matthew Deik", email = "131482791+mdeik@users.noreply.github.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "mutagen>=1.47.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[project.urls]
+Homepage = "https://github.com/mdeik/mudio"
+Repository = "https://github.com/mdeik/mudio"
+
+[project.scripts]
+mudio = "mudio.cli:main"
+mudio-stress-test = "scripts.stress_test:run_stress_test"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "-ra"
+]
+[tool.hatch.build]
+exclude = [
+  "scripts/",
+  "tests/",
+  "dev/",
+  "*.log",
+  ".gitignore"
+]
