@@ -4,7 +4,7 @@ import pytest
 import stat
 import shutil
 from pathlib import Path
-from mudio import process_file, op_overwrite
+from mudio import process_file, overwrite
 
 def test_readonly_file_handling(tmp_path, audio_template):
     """Test that read-only files fail gracefully."""
@@ -17,7 +17,7 @@ def test_readonly_file_handling(tmp_path, audio_template):
     try:
         result = process_file(
             str(test_file),
-            ops={"title": op_overwrite("title", "New Title")},
+            ops={"title": overwrite("title", "New Title")},
             targeted_fields=["title"],
             dry_run=False,
             backup_dir=None
@@ -47,7 +47,7 @@ def test_readonly_backup_dir_handling(tmp_path, audio_template):
     try:
         result = process_file(
             str(test_file),
-            ops={"title": op_overwrite("title", "New Title")},
+            ops={"title": overwrite("title", "New Title")},
             targeted_fields=["title"],
             dry_run=False,
             backup_dir=str(backup_dir)

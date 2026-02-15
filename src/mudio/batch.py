@@ -54,15 +54,15 @@ def process_batch(
     Examples:
         Basic usage - set all titles in a directory:
         >>> from mudio.batch import process_batch
-        >>> from mudio.operations import op_overwrite
-        >>> ops = {'title': op_overwrite('title', 'New Title')}
+        >>> from mudio.operations import overwrite
+        >>> ops = {'title': overwrite('title', 'New Title')}
         >>> result = process_batch('/music', ops, ['title'])
         >>> print(f"Processed {result['successful']} files")
         
         Set multiple fields with backup:
         >>> ops = {
-        ...     'artist': op_overwrite('artist', 'Artist Name'),
-        ...     'album': op_overwrite('album', 'Album Name')
+        ...     'artist': overwrite('artist', 'Artist Name'),
+        ...     'album': overwrite('album', 'Album Name')
         ... }
         >>> result = process_batch(
         ...     '/music', 
@@ -73,8 +73,8 @@ def process_batch(
         ... )
         
         Filter and process only specific files:
-        >>> from mudio.operations import op_append
-        >>> ops = {'genre': op_append('genre', 'Rock', delimiter=';')}
+        >>> from mudio.operations import append
+        >>> ops = {'genre': append('genre', 'Rock', delimiter=';')}
         >>> filters = [('artist', 'Beatles', False)]
         >>> result = process_batch(
         ...     '/music',
@@ -102,7 +102,7 @@ def process_batch(
         files,
         operations,
         fields,
-        max_workers=max_workers,
+        max_workers=max_workers or 0,
         use_parallel=use_parallel,
         filters=filters,
         dry_run=dry_run,
@@ -171,7 +171,7 @@ def set_fields(
         ... )
         >>> print(f"Would modify {result['processed']} files")
     """
-    from .operations import op_overwrite
+    from .operations import overwrite
     
     operations = {}
     field_list = []
@@ -180,7 +180,7 @@ def set_fields(
         if field_name not in CANONICAL_FIELDS:
             raise ValueError(f"Invalid field: {field_name}")
         
-        operations[field_name] = op_overwrite(field_name, value)
+        operations[field_name] = overwrite(field_name, value)
         field_list.append(field_name)
     
     return process_batch(path, operations, field_list, **kwargs)

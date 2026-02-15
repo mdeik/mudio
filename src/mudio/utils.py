@@ -34,6 +34,8 @@ class Config:
     MAX_WORKERS = min(32, (os.cpu_count() or 1) + 4)
     MIN_FILES_FOR_PARALLEL = 10
     PROGRESS_LOCK = Lock()
+
+    DEFAULT_SCHEMA = 'extended'
     
     @classmethod
     def validate(cls) -> None:
@@ -48,6 +50,8 @@ class Config:
             raise ValueError("MAX_WORKERS must be positive")
         if cls.MIN_FILES_FOR_PARALLEL <= 0:
             raise ValueError("MIN_FILES_FOR_PARALLEL must be positive")
+        if cls.DEFAULT_SCHEMA not in ('canonical', 'extended', 'raw'):
+            raise ValueError(f"Invalid DEFAULT_SCHEMA: {cls.DEFAULT_SCHEMA}")
     
     @classmethod
     def load_from_env(cls) -> None:
@@ -60,6 +64,8 @@ class Config:
             cls.MAX_WORKERS = int(os.getenv('MUDIO_MAX_WORKERS'))
         if os.getenv('MUDIO_MIN_PARALLEL'):
             cls.MIN_FILES_FOR_PARALLEL = int(os.getenv('MUDIO_MIN_PARALLEL'))
+        if os.getenv('MUDIO_SCHEMA'):
+            cls.DEFAULT_SCHEMA = os.getenv('MUDIO_SCHEMA')
         cls.validate()
 
 # Thread-safe output helpers

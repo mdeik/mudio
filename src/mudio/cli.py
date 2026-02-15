@@ -29,15 +29,15 @@ from .operations import (
     FieldOperationsType, 
     FieldValuesType, 
     FilterType,
-    op_overwrite,
-    op_find_replace,
-    op_append,
-    op_prefix,
-    op_prefix,
-    op_enlist,
-    op_delist,
-    op_clear,
-    op_delete
+    overwrite,
+    find_replace,
+    append,
+    prefix,
+    prefix,
+    enlist,
+    delist,
+    clear,
+    delete
 )
 from .processor import (
     ProcessResultType,
@@ -55,18 +55,17 @@ def validate_args(args: argparse.Namespace) -> None:
     errors = []
     
     # Validate mode and required parameters
-    if args.mode in ('find-replace', 'append', 'prefix', 'enlist', 'set', 'clear', 'delete', 'delist', 'purge'):
-        if args.mode == 'find-replace' and (args.find is None or args.replace is None):
-            errors.append("find-replace mode requires --find and --replace")
-        if args.mode in ('append', 'prefix', 'enlist', 'delist') and args.value is None:
-            errors.append(f"{args.mode} mode requires --value")
-        if args.mode == 'set':
-            has_numeric_target = any([args.date, args.track, args.total_tracks, args.disc, args.total_discs])
-            has_field_val_target = (args.fields or args.standard_fields or args.all_fields) and args.value
-            if not (has_numeric_target or has_field_val_target):
-                errors.append("set mode requires at least one field to set (--date, --track, etc.) or a target fields argument (--fields/--standard-fields/--all-fields) combined with --value")
-        if args.mode in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete') and not (args.fields or args.standard_fields or args.all_fields):
-            errors.append(f"{args.mode} mode requires --fields, --standard-fields, or --all-fields")
+    # Validate operation and required parameters
+    if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'set', 'clear', 'delete', 'delist', 'purge'):
+        if args.operation == 'find-replace' and (args.find is None or args.replace is None):
+            errors.append("find-replace operation requires --find and --replace")
+        if args.operation in ('append', 'prefix', 'enlist', 'delist') and args.value is None:
+            errors.append(f"{args.operation} operation requires --value")
+        if args.operation == 'set':
+            if not (args.fields and args.value):
+                errors.append("set operation requires --fields and --value")
+        if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete') and not args.fields:
+            errors.append(f"{args.operation} operation requires --fields")
     
     # Validate path
     if not os.path.exists(args.path):
@@ -99,8 +98,8 @@ def main() -> None:
         
         # Core arguments
         parser.add_argument("path", nargs='?', default='.', help="Directory or file to process")
-        parser.add_argument("--mode", choices=['find-replace','append','prefix','enlist','delist','set','clear','delete','purge','print'], 
-                        required=False, help="Operation mode (use 'set' for metadata assignment, 'clear' to empty, 'delete' to remove)")
+        parser.add_argument("--operation", choices=['find-replace','append','prefix','enlist','delist','set','clear','delete','purge','print'], 
+                        required=False, help="Operation (use 'set' for metadata assignment, 'clear' to empty, 'delete' to remove)")
         
         # Threading and performance
         parser.add_argument(
@@ -117,8 +116,7 @@ def main() -> None:
         
         # Field operations
         parser.add_argument("--fields", help="Comma-separated fields")
-        parser.add_argument("--standard-fields", action='store_true', help="Target all standard fields")
-        parser.add_argument("--all-fields", action='store_true', help="Target all available fields (including custom)")
+
         
         parser.add_argument("--find", help="Find string or pattern (for find-replace)")
         parser.add_argument("--replace", help="Replacement string (for find-replace)")
@@ -145,19 +143,17 @@ def main() -> None:
         parser.add_argument("--run-tests", action='store_true', help="Run test suite")
         parser.add_argument("--test-dir", help="Test directory location")
         
-        # Numeric fields
-        parser.add_argument("--date", help="Set date field")
-        parser.add_argument("--track", help="Set track number")
-        parser.add_argument("--total-tracks", help="Set total tracks")
-        parser.add_argument("--disc", help="Set disc number")
-        parser.add_argument("--total-discs", help="Set total discs")
+
         
         # Logging
         parser.add_argument("--verbose", action='store_true', help="Enable verbose logging")
         
-        # Print mode options
-        # --all-fields is now general, but we keep the logic for print mode separate
-        parser.add_argument("--raw-fields", action='store_true', help="Print raw tag keys")
+        # Schema options
+        parser.add_argument("--schema", choices=['canonical', 'extended', 'raw'], 
+                           help="Metadata schema to use (overrides default/env var)")
+        
+        # Deprecated: --extended-fields, --canonical-fields, --raw-fields are removed.
+        # Use --schema instead.
         
         args = parser.parse_args()
         
@@ -191,9 +187,9 @@ def main() -> None:
             return
         
         # Build operations from arguments
-        ops, targeted_fields, dynamic_op = build_operations_from_args(args)
-        if not ops and not dynamic_op and args.mode != 'print':
-            print("No operations defined. Use --mode or --run-tests.", file=sys.stderr)
+        ops, targeted_fields = build_operations_from_args(args)
+        if not ops and args.operation != 'print':
+            print("No operations defined. Use --operation or --run-tests.", file=sys.stderr)
             sys.exit(EXIT_CODE_USAGE)
         
         # Parse filters
@@ -201,7 +197,7 @@ def main() -> None:
         
         # Process files
         try:
-            exit_code = run_processing_session(args, ops, targeted_fields, filters, dynamic_op)
+            exit_code = run_processing_session(args, ops, targeted_fields, filters)
             sys.exit(exit_code)
         except KeyboardInterrupt:
             sys.exit(EXIT_CODE_INTERRUPTED)
@@ -223,20 +219,19 @@ def main() -> None:
         # Ensure signal handlers are unregistered on exit
         unregister_signal_handlers()
 
-def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperationsType, List[str], Optional[Callable[[str], Any]]]:
+def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperationsType, List[str]]:
     """Build operations from command line arguments."""
-    dynamic_op_factory = None
     targeted_fields = []
     ops = {}
     
-    if args.mode == 'purge':
+    if args.operation == 'purge':
         targeted_fields = CANONICAL_FIELDS.copy()
-        ops = {f: op_clear(f) for f in targeted_fields}
-        return ops, targeted_fields, None
+        ops = {f: clear(f) for f in targeted_fields}
+        return ops, targeted_fields
     
-    if args.mode == 'print':
-        # Print mode logic handled separately in main/print_file_result
-        return {}, [], None
+    if args.operation == 'print':
+        # Print operation logic handled separately in main/print_file_result
+        return {}, []
     
     # helper to get delimiter
     delimiter = getattr(args, 'delimiter', ';')
@@ -246,70 +241,39 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperation
         requested = parse_field_list(args.fields)
         targeted_fields.extend(requested)
     
-    # 2. Handle standard fields (--standard-fields)
-    if getattr(args, 'standard_fields', False):
-        targeted_fields.extend(CANONICAL_FIELDS)
+    # 2. Handle canonical fields (Removed --canonical-fields flag)
+    # Schema selection is now handled via --schema and passed to processor
         
     targeted_fields = list(set(targeted_fields)) # Deduplicate
     
     # 3. Create operations for explicitly targeted fields
-    if args.mode == 'set':
-        # Numeric fields handling
-        numeric_fields = {
-            'date': args.date, 'track': args.track, 'totaltracks': args.total_tracks,
-            'disc': args.disc, 'totaldiscs': args.total_discs
-        }
-        for field, value in numeric_fields.items():
-            if value is not None:
-                ops[field] = op_overwrite(field, value, delimiter=delimiter)
-                if field not in targeted_fields:
-                    targeted_fields.append(field)
-
-        # Apply value to other targeted fields in set mode
+    # 3. Create operations for explicitly targeted fields
+    if args.operation == 'set':
+        # Apply value to other targeted fields in set operation
         if args.value and targeted_fields:
              for field in targeted_fields:
-                 if field not in ops: # Don't overwrite numeric args
-                     ops[field] = op_overwrite(field, args.value, delimiter=delimiter)
+                 if field not in ops:
+                     ops[field] = overwrite(field, args.value, delimiter=delimiter)
 
-    elif args.mode in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete'):
+    elif args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete'):
         for field in targeted_fields:
-            if args.mode == 'find-replace':
-                ops[field] = op_find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter)
-            # overwrite mode removed, functionality merged into set
-            elif args.mode == 'append':
-                ops[field] = op_append(field, args.value, delimiter=delimiter)
-            elif args.mode == 'prefix':
-                ops[field] = op_prefix(field, args.value)
-            elif args.mode == 'enlist':
-                ops[field] = op_enlist(field, args.value, delimiter=delimiter)
-            elif args.mode == 'delist':
-                ops[field] = op_delist(field, args.value, delimiter=delimiter)
-            elif args.mode == 'clear':
-                ops[field] = op_clear(field)
-            elif args.mode == 'delete':
-                ops[field] = op_delete(field)
+            if args.operation == 'find-replace':
+                ops[field] = find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter)
+            # overwrite operation removed, functionality merged into set
+            elif args.operation == 'append':
+                ops[field] = append(field, args.value, delimiter=delimiter)
+            elif args.operation == 'prefix':
+                ops[field] = prefix(field, args.value)
+            elif args.operation == 'enlist':
+                ops[field] = enlist(field, args.value, delimiter=delimiter)
+            elif args.operation == 'delist':
+                ops[field] = delist(field, args.value, delimiter=delimiter)
+            elif args.operation == 'clear':
+                ops[field] = clear(field)
+            elif args.operation == 'delete':
+                ops[field] = delete(field)
 
-    # 4. Handle dynamic operations (--all-fields)
-    if getattr(args, 'all_fields', False):
-        if args.mode == 'find-replace':
-            dynamic_op_factory = lambda f: op_find_replace(f, args.find, args.replace, regex=args.regex, delimiter=delimiter)
-        # overwrite mode removed
-        elif args.mode in ('set', 'append') and args.value:
-             dynamic_op_factory = lambda f: op_overwrite(f, args.value, delimiter=delimiter) if args.mode == 'set' else op_append(f, args.value, delimiter=delimiter)
-        elif args.mode == 'append':
-             dynamic_op_factory = lambda f: op_append(f, args.value, delimiter=delimiter)
-        elif args.mode == 'prefix':
-            dynamic_op_factory = lambda f: op_prefix(f, args.value)
-        elif args.mode == 'enlist':
-            dynamic_op_factory = lambda f: op_enlist(f, args.value, delimiter=delimiter)
-        elif args.mode == 'delist':
-            dynamic_op_factory = lambda f: op_delist(f, args.value, delimiter=delimiter)
-        elif args.mode == 'clear':
-            dynamic_op_factory = lambda f: op_clear(f)
-        elif args.mode == 'delete':
-            dynamic_op_factory = lambda f: op_delete(f)
-            
-    return ops, targeted_fields, dynamic_op_factory
+    return ops, targeted_fields
 
 def parse_field_list(fields_str: str) -> List[str]:
     """Parse comma-separated field list and normalize to canonical names."""
@@ -372,8 +336,7 @@ def parse_filter_expression(expr: str) -> Tuple[str, str]:
     return field, pattern
 
 def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType, 
-                          targeted_fields: List[str], filters: List[FilterType],
-                          dynamic_op: Optional[Callable[[str], Any]] = None) -> int:
+                          targeted_fields: List[str], filters: List[FilterType]) -> int:
     """Process files using the parallel processor. Returns exit code."""
     # Build extension set
     ext_set = None
@@ -397,7 +360,7 @@ def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType,
         files,
         ops,
         targeted_fields,
-        max_workers=args.threads,
+        max_workers=args.threads or 0,
         use_parallel=not args.no_parallel,
         filters=filters,
         dry_run=args.dry_run,
@@ -405,7 +368,7 @@ def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType,
         delete_backups=args.delete_backups,
         force=args.force,
         verbose=args.verbose,
-        dynamic_op=dynamic_op
+        read_schema=args.schema
     )
     
     per_ext = defaultdict(list)
@@ -434,23 +397,18 @@ def print_file_result(rec: ProcessResultType, args: argparse.Namespace) -> None:
     orig = rec.get('original', {})
     planned = rec.get('planned', {})
     
-    # Reread if raw or all fields requested for print mode
-    if args.mode == 'print':
-        mode = 'canonical'
-        if args.raw_fields:
-            mode = 'raw'
-        elif args.all_fields:
-            mode = 'extended'
+    # Reread if schema is specified or default behavior for print
+    if args.operation == 'print':
+        read_schema = args.schema or 'extended' # Default for print is extended
             
-        if mode != 'canonical':
-            try:
-                with managed_simple_music(Path(rec['path'])) as sm:
-                    orig = sm.read_fields(mode=mode)
-            except Exception:
-                pass # Fallback to cached original
+        try:
+            with managed_simple_music(Path(rec['path'])) as sm:
+                orig = sm.read_fields(schema=read_schema)
+        except Exception:
+            pass # Fallback to cached original
             
     print("  Original:")
-    print_metadata(orig, all_fields=args.all_fields, raw_fields=args.raw_fields)
+    print_metadata(orig, raw_fields=(args.schema == 'raw'))
     
     if args.dry_run:
         print("  Dry-run: planned result:")
@@ -469,29 +427,24 @@ def print_file_result(rec: ProcessResultType, args: argparse.Namespace) -> None:
         
         # Show final metadata
         try:
-            mode = 'canonical'
-            if args.raw_fields:
-                mode = 'raw'
-            elif args.all_fields:
-                mode = 'extended'
+            read_schema = args.schema or 'canonical' # Default for verification read
                 
             with managed_simple_music(Path(rec['path'])) as sm:
-                final_fields = sm.read_fields(mode=mode)
+                final_fields = sm.read_fields(schema=read_schema)
             print("  Final metadata:")
-            print_metadata(final_fields, all_fields=args.all_fields, raw_fields=args.raw_fields)
+            print_metadata(final_fields, raw_fields=(args.schema == 'raw'))
         except Exception as e:
             print(f"  Could not read final metadata: {e}")
     else:
         print(f"  Note: {rec.get('note', 'NOT WRITTEN')}")
 
-def print_metadata(metadata: FieldValuesType, max_len: int = 150, all_fields: bool = False, raw_fields: bool = False) -> None:
+def print_metadata(metadata: FieldValuesType, max_len: int = 150, raw_fields: bool = False) -> None:
     """
     Print metadata in a consistent format with truncation.
     
     Args:
         metadata: Dictionary of field values.
         max_len: Maximum length for displayed values before truncation.
-        all_fields: If True, print all fields in the metadata dict.
         raw_fields: If True, keys are printed as-is (implies all_fields behavior).
     """
     
@@ -501,7 +454,7 @@ def print_metadata(metadata: FieldValuesType, max_len: int = 150, all_fields: bo
             return s[:max_len-3] + "..."
         return s
 
-    if raw_fields or all_fields:
+    if raw_fields:
         # Map of key -> Display Name (from canonical list below)
         display_map = {
             'title': 'Title', 'artist': 'Artist', 'album': 'Album',
@@ -524,32 +477,36 @@ def print_metadata(metadata: FieldValuesType, max_len: int = 150, all_fields: bo
 
     fields = [
         ('Title', 'title'),
-        ('Artists', 'artist'),
+        ('Artist', 'artist'),
         ('Album', 'album'),
-        ('AlbumArtists', 'albumartist'),
-        ('Genres', 'genre'),
+        ('AlbumArtist', 'albumartist'),
+        ('Genre', 'genre'),
         ('Comment', 'comment'),
         ('Composer', 'composer'),
         ('Performer', 'performer'),
-        ('Date', 'date')
+        ('Date', 'date'),
+        ('Track', 'track'),
+        ('TotalTracks', 'totaltracks'),
+        ('Disc', 'disc'),
+        ('TotalDiscs', 'totaldiscs')
     ]
     
-    def format_val(val_list: List[str]) -> str:
-        s = join_for_printing(val_list)
-        if len(s) > max_len:
-            return s[:max_len-3] + "..."
-        return s
+    # Track printed keys to avoid duplicates
+    printed_keys = set()
     
+    # Print canonical fields first with nice display names
     for display_name, field_name in fields:
         values = metadata.get(field_name, [])
         print(f"    {display_name}: {format_val(values)}")
-    
-    # Track/Disc info usually short enough, but we format anyway
-    track_info = f"{join_for_printing(metadata.get('track', []))}/{join_for_printing(metadata.get('totaltracks', []))}"
-    disc_info = f"{join_for_printing(metadata.get('disc', []))}/{join_for_printing(metadata.get('totaldiscs', []))}"
-    
-    print(f"    Track/TotalTracks: {track_info}")
-    print(f"    Disc/TotalDiscs: {disc_info}")
+        printed_keys.add(field_name)
+            
+    # Print any remaining (custom/extended) fields
+    for key in sorted(metadata.keys()):
+        if key not in printed_keys:
+            # Simple title case for display key if it looks like a key
+            display_key = key.title() if key.islower() else key
+            values = metadata[key]
+            print(f"    {display_key}: {format_val(values)}")
 
 def generate_summary(results: List[ProcessResultType], per_ext: Dict[str, List[bool]], args: argparse.Namespace) -> int:
     """Generate and print processing summary. Returns exit code."""

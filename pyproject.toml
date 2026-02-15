@@ -1,6 +1,6 @@
 [project]
 name = "mudio"
-version = "1.0.0"
+version = "2.0.1"
 description = "Friendly command-line music-metadata editor and Python library"
 authors = [{name = "Matthew Deik", email = "131482791+mdeik@users.noreply.github.com"}]
 license = {text = "MIT"}
@@ -22,7 +22,6 @@ Repository = "https://github.com/mdeik/mudio"
 
 [project.scripts]
 mudio = "mudio.cli:main"
-mudio-stress-test = "scripts.stress_test:run_stress_test"
 
 [build-system]
 requires = ["hatchling"]

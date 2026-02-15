@@ -2,14 +2,15 @@
 import pytest
 from mudio.operations import (
     FieldOperations,
-    op_overwrite,
-    op_append,
-    op_prefix,
-    op_prefix,
-    op_enlist,
-    op_delist,
-    op_find_replace,
-    op_clear,
+    overwrite,
+    append,
+    prefix,
+    prefix,
+    enlist,
+    delist,
+    find_replace,
+    clear,
+    delete,
     match_artists_bipartite,
     match_artist_single
 )
@@ -43,77 +44,85 @@ class TestOperations:
     """Tests for operation functions."""
 
     def test_op_overwrite(self):
-        op = op_overwrite('title', 'New')
+        op = overwrite('title', 'New')
         assert op(['Old']) == ['New']
         assert op([]) == ['New']
         
         # Test overwrite with empty value -> clear
-        op_empty = op_overwrite('title', '')
+        op_empty = overwrite('title', '')
         assert op_empty(['Old']) == []
 
     def test_op_append(self):
         # Single valued: concatenate
-        op = op_append('title', ' Suffix')
+        op = append('title', ' Suffix')
         assert op(['Title']) == ['Title Suffix']
         
         # Multi valued: add new item
-        op_multi = op_append('artist', 'New Artist')
+        op_multi = append('artist', 'New Artist')
         assert op_multi(['Old Artist']) == ['Old Artist', 'New Artist']
         
         # Comment: append to EACH
-        op_comment = op_append('comment', ' [Live]')
+        op_comment = append('comment', ' [Live]')
         assert op_comment(['C1', 'C2']) == ['C1 [Live]', 'C2 [Live]']
 
     def test_op_prefix(self):
         # Single valued: prepend
-        op = op_prefix('title', 'Prefix ')
+        op = prefix('title', 'Prefix ')
         assert op(['Title']) == ['Prefix Title']
         
         # Multi valued: prepend to ALL
-        op_multi = op_prefix('artist', 'The ')
+        op_multi = prefix('artist', 'The ')
         assert op_multi(['Beatles', 'Stones']) == ['The Beatles', 'The Stones']
 
     def test_op_enlist(self):
         # Enlist only if not exists (for multi-valued)
-        op = op_enlist('artist', 'New')
+        op = enlist('artist', 'New')
         assert op(['Old']) == ['Old', 'New']
         assert op(['Old', 'New']) == ['Old', 'New'] # No dupe
         
         # For single valued, behaves like append
-        op_single = op_enlist('title', ' New')
+        op_single = enlist('title', ' New')
         assert op_single(['Old']) == ['Old New']
 
     def test_op_delist(self):
         # Remove single value
-        op = op_delist('artist', 'Old')
+        op = delist('artist', 'Old')
         assert op(['Old', 'New']) == ['New']
         
         # Remove multiple values
-        op_multi = op_delist('genre', 'Rock;Pop', delimiter=';')
+        op_multi = delist('genre', 'Rock;Pop', delimiter=';')
         assert op_multi(['Rock', 'Pop', 'Jazz']) == ['Jazz']
         
         # Case insensitive removal
-        op_case = op_delist('artist', 'old')
+        op_case = delist('artist', 'old')
         assert op_case(['Old', 'New']) == ['New']
         
         # Handle empty/non-existent
-        op_none = op_delist('artist', 'Missing')
+        op_none = delist('artist', 'Missing')
         assert op_none(['Old']) == ['Old']
 
     def test_op_find_replace_plain(self):
-        op = op_find_replace('title', 'Old', 'New', regex=False)
+        op = find_replace('title', 'Old', 'New', regex=False)
         assert op(['Old Title']) == ['New Title']
         # Case sensitive check: 'Bold' contains 'old' but we search for 'Old'. 
         # Should NOT match.
         assert op(['Bold Title']) == ['Bold Title']
 
     def test_op_find_replace_regex(self):
-        op = op_find_replace('title', r'\d+', '#', regex=True)
+        op = find_replace('title', r'\d+', '#', regex=True)
         assert op(['Track 01']) == ['Track #']
 
     def test_op_clear(self):
-        op = op_clear('title')
+        op = clear('title')
         assert op(['Anything']) == [""]
+
+    def test_op_delete(self):
+        """Test delete operation removes field entirely."""
+        op = delete('title')
+        # delete returns [] to indicate field should be removed
+        assert op(['Anything']) == []
+        assert op(['Multiple', 'Values']) == []
+        assert op([]) == []
 
 
 class TestArtistMatching:

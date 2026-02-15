@@ -42,7 +42,7 @@ class TestCustomFieldsReal:
             
         # 2. Read back (extended mode)
         with SimpleMusic.managed(audio_file) as sm:
-            fields = sm.read_fields(mode='extended')
+            fields = sm.read_fields(schema='extended')
             
             # Check for the key
             # Note: casing might change depending on format (e.g. Vorbis is case-insensitive usually, but mapped to lower)
@@ -80,7 +80,7 @@ class TestCustomFieldsReal:
             sm.write_fields({custom_key: custom_vals})
             
         with SimpleMusic.managed(audio_file) as sm:
-            fields = sm.read_fields(mode='extended')
+            fields = sm.read_fields(schema='extended')
             
             found_val = []
             for k, v in fields.items():

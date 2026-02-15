@@ -51,7 +51,7 @@ class FieldOperations:
         
         return normalized
 
-def op_find_replace(field_name: str, find: str, replace: str, regex: bool = False, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def find_replace(field_name: str, find: str, replace: str, regex: bool = False, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create a find/replace operation that substitutes text patterns in field values.
     
@@ -67,12 +67,12 @@ def op_find_replace(field_name: str, find: str, replace: str, regex: bool = Fals
     
     Examples:
         Replace literal text:
-        >>> op = op_find_replace('title', 'Demo', 'Final')
+        >>> op = find_replace('title', 'Demo', 'Final')
         >>> op(['Demo Track']) 
         ['Final Track']
         
         Regex replacement:
-        >>> op = op_find_replace('title', r'\\d+', 'X', regex=True)
+        >>> op = find_replace('title', r'\\d+', 'X', regex=True)
         >>> op(['Track 01'])
         ['Track X']
     """
@@ -93,7 +93,7 @@ def op_find_replace(field_name: str, find: str, replace: str, regex: bool = Fals
     
     return op
 
-def op_overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create an overwrite operation that completely replaces field values.
     
@@ -107,12 +107,12 @@ def op_overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Calla
     
     Examples:
         Set single value:
-        >>> op = op_overwrite('title', 'New Title')
+        >>> op = overwrite('title', 'New Title')
         >>> op(['Old Title'])
         ['New Title']
         
         Set multiple artists:
-        >>> op = op_overwrite('artist', 'Artist A;Artist B', delimiter=';')
+        >>> op = overwrite('artist', 'Artist A;Artist B', delimiter=';')
         >>> op(['Old Artist'])
         ['Artist A', 'Artist B']
     """
@@ -126,7 +126,7 @@ def op_overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Calla
     
     return op
 
-def op_append(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def append(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create an append operation that adds text to existing field values.
     
@@ -145,12 +145,12 @@ def op_append(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     Examples:
         Append to title:
-        >>> op = op_append('title', ' (Remastered)')
+        >>> op = append('title', ' (Remastered)')
         >>> op(['Original'])
         ['Original (Remastered)']
         
         Add genre:
-        >>> op = op_append('genre', 'Electronic')
+        >>> op = append('genre', 'Electronic')
         >>> op(['Rock'])
         ['Rock', 'Electronic']
     """
@@ -176,7 +176,7 @@ def op_append(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     return op
 
-def op_prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str]]:
+def prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str]]:
     """
     Create a prefix operation that prepends text to field values.
     
@@ -194,12 +194,12 @@ def op_prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str
     
     Examples:
         Prefix title:
-        >>> op = op_prefix('title', 'The ')
+        >>> op = prefix('title', 'The ')
         >>> op(['Song'])
         ['The Song']
         
         Prefix all artists:
-        >>> op = op_prefix('artist', 'DJ ')
+        >>> op = prefix('artist', 'DJ ')
         >>> op(['John', 'Jane'])
         ['DJ John', 'DJ Jane']
     """
@@ -221,7 +221,7 @@ def op_prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str
     
     return op
 
-def op_enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create an enlist operation for multi-valued fields (warns/converts for single-valued).
     
@@ -238,18 +238,18 @@ def op_enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     Examples:
         Enlist artists (no duplicates):
-        >>> op = op_enlist('artist', 'New Artist')
+        >>> op = enlist('artist', 'New Artist')
         >>> op(['Existing Artist', 'Another'])
         ['Existing Artist', 'Another', 'New Artist']
         
         Enlist multiple genres:
-        >>> op = op_enlist('genre', 'Rock;Metal', delimiter=';')
+        >>> op = enlist('genre', 'Rock;Metal', delimiter=';')
         >>> op(['Electronic'])
         ['Electronic', 'Rock', 'Metal']
     """
     def op(values: List[str]) -> List[str]:
         if not FieldOperations.is_multi_valued(field_name):
-            return op_append(field_name, value_str, delimiter=delimiter)(values)
+            return append(field_name, value_str, delimiter=delimiter)(values)
         
         new_values = list(values)
         add_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
@@ -263,7 +263,7 @@ def op_enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     return op
 
-def op_clear(field_name: str) -> Callable[[List[str]], List[str]]:
+def clear(field_name: str) -> Callable[[List[str]], List[str]]:
     """
     Create a clear operation that sets field to empty string.
     
@@ -274,7 +274,7 @@ def op_clear(field_name: str) -> Callable[[List[str]], List[str]]:
         Operation function that returns [''] (empty but present)
     
     Example:
-        >>> op = op_clear('comment')
+        >>> op = clear('comment')
         >>> op(['Old comment'])
         ['']
     """
@@ -282,7 +282,7 @@ def op_clear(field_name: str) -> Callable[[List[str]], List[str]]:
         return [""]
     return op
 
-def op_delete(field_name: str) -> Callable[[List[str]], List[str]]:
+def delete(field_name: str) -> Callable[[List[str]], List[str]]:
     """
     Create a delete operation that removes the field entirely.
     
@@ -293,7 +293,7 @@ def op_delete(field_name: str) -> Callable[[List[str]], List[str]]:
         Operation function that returns [] (field removed)
     
     Example:
-        >>> op = op_delete('comment')
+        >>> op = delete('comment')
         >>> op(['Any value'])
         []
     """
@@ -301,7 +301,7 @@ def op_delete(field_name: str) -> Callable[[List[str]], List[str]]:
         return []
     return op
 
-def op_delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create a delist operation that removes specific values from multi-valued fields.
     
@@ -315,7 +315,7 @@ def op_delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     Examples:
         Remove an artist:
-        >>> op = op_delist('artist', 'Artist A')
+        >>> op = delist('artist', 'Artist A')
         >>> op(['Artist A', 'Artist B'])
         ['Artist B']
     """
@@ -355,7 +355,7 @@ def compute_new_fields(orig_fields: FieldValuesType,
     
     Example:
         >>> orig = {'title': ['Old'], 'artist': ['John']}
-        >>> ops = {'title': op_overwrite('title', 'New')}
+        >>> ops = {'title': overwrite('title', 'New')}
         >>> new, changed = compute_new_fields(orig, ops, ['title', 'artist'])
         >>> changed
         {'title': True, 'artist': False}

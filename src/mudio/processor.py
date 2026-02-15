@@ -51,7 +51,7 @@ def unregister_signal_handlers():
             pass
 
 # ---------- Parallel Processing ----------
-def process_files_parallel(
+def _process_files_parallel(
     files: Iterable[Path],
     ops: FieldOperationsType,
     targeted_fields: List[str],
@@ -63,8 +63,8 @@ def process_files_parallel(
     delete_backups: bool = False,
     force: bool = False,
     verbose: bool = False,
-    dynamic_op: Optional[Callable[[str], Any]] = None,
-    verify: bool = True
+    verify: bool = True,
+    read_schema: Optional[str] = None
 ) -> List[ProcessResultType]:
     """
     Process multiple files in parallel using a thread pool.
@@ -80,7 +80,7 @@ def process_files_parallel(
         delete_backups: If True, delete successful backups
         force: Allow potentially destructive operations
         verbose: Show progress and detailed output
-        dynamic_op: Optional function for dynamic operation generation
+
         verify: Verify writes by reading back from disk
     
     Returns:
@@ -110,8 +110,9 @@ def process_files_parallel(
                 backup_dir=backup_dir,
                 delete_backups=delete_backups,
                 force=force,
-                dynamic_op=dynamic_op,
-                verify=verify
+
+                verify=verify,
+                read_schema=read_schema
             ): file_path for file_path in files_list
         }
         
@@ -151,11 +152,16 @@ def process_files(
     ops: FieldOperationsType,
     targeted_fields: List[str],
     *,
-    max_workers: Optional[int] = None,
+    max_workers: int = 0,
     use_parallel: bool = True,
-    verify: bool = True,
+    filters: Optional[List[FilterType]] = None,
+    dry_run: bool = False,
+    backup_dir: Optional[str] = None,
     delete_backups: bool = False,
-    **kwargs
+    force: bool = False,
+    verbose: bool = False,
+    verify: bool = True,
+    read_schema: Optional[str] = None
 ) -> List[ProcessResultType]:
     """
     Smart dispatcher that chooses between parallel and sequential processing.
@@ -165,52 +171,62 @@ def process_files(
     
     if total_files == 0:
         return []
+
+    # Treat 0 as auto (None previously)
+    effective_workers = max_workers if max_workers > 0 else Config.MAX_WORKERS
     
     should_use_parallel = (
         use_parallel and 
         total_files >= Config.MIN_FILES_FOR_PARALLEL and
-        max_workers != 1
+        effective_workers != 1
     )
     
     if should_use_parallel:
         with Config.PROGRESS_LOCK:
-            logger.info(f"Using parallel processing with {max_workers or Config.MAX_WORKERS} workers")
-            if kwargs.get('verbose'):
+            logger.info(f"Using parallel processing with {effective_workers} workers")
+            if verbose:
                 print(f"Processing {total_files} files in parallel...")
         
-        return process_files_parallel(
+        return _process_files_parallel(
             files_list, ops, targeted_fields,
-            max_workers=max_workers, 
-            dynamic_op=kwargs.get('dynamic_op'),
-            verify=verify,
+            max_workers=effective_workers, 
+            filters=filters,
+            dry_run=dry_run,
+            backup_dir=backup_dir,
             delete_backups=delete_backups,
-            **kwargs
+            force=force,
+            verbose=verbose,
+            verify=verify,
+            read_schema=read_schema
         )
     else:
         with Config.PROGRESS_LOCK:
             logger.info("Using sequential processing")
-            if kwargs.get('verbose'):
+            if verbose:
                 print(f"Processing {total_files} files sequentially...")
         
         results = []
         for i, file_path in enumerate(files_list, 1):
-            if kwargs.get('verbose'):
+            if verbose:
                 progress_msg = f"Progress: {i}/{total_files} ({i/total_files*100:.1f}%)"
                 print(progress_msg, end='\r' if i < total_files else '\n')
             
             result = process_file(
                 str(file_path), ops, targeted_fields,
-                filters=kwargs.get('filters'),
-                dry_run=kwargs.get('dry_run', False),
-                backup_dir=kwargs.get('backup_dir'),
+                max_workers=effective_workers,
+                use_parallel=False,
+                filters=filters,
+                dry_run=dry_run,
+                backup_dir=backup_dir,
                 delete_backups=delete_backups,
-                force=kwargs.get('force', False),
-                dynamic_op=kwargs.get('dynamic_op'),
-                verify=verify
+                force=force,
+                verbose=verbose,
+                verify=verify,
+                read_schema=read_schema
             )
             results.append(result)
             
-            if kwargs.get('verbose') and result.get('error'):
+            if verbose and result.get('error'):
                 print(f"  ERROR: {result['error']}")
         
         return results
@@ -318,7 +334,7 @@ def verify_written(path: Path, expected_fields: FieldValuesType) -> Dict[str, bo
         return {field: False for field in expected_fields}
 
 # ---------- File Processing Components ----------
-def _validate_and_read_file(path: Path, read_mode: str = 'canonical') -> Tuple[bool, str, Optional[FieldValuesType]]:
+def _validate_and_read_file(path: Path, read_schema: str = 'canonical') -> Tuple[bool, str, Optional[FieldValuesType]]:
     """Validate file and read original fields."""
     ext = path.suffix.lower()
     
@@ -328,7 +344,7 @@ def _validate_and_read_file(path: Path, read_mode: str = 'canonical') -> Tuple[b
     
     try:
         with SimpleMusic.managed(path) as sm:
-            orig = sm.read_fields(mode=read_mode)
+            orig = sm.read_fields(schema=read_schema)
         return True, "", orig
     except Exception as e:
         return False, f'file error: {e}', None
@@ -412,13 +428,17 @@ def _cleanup_backup(backup_path: Optional[Path], force: bool, delete_backups: bo
 def process_file(path: str, 
                 ops: FieldOperationsType, 
                 targeted_fields: List[str], 
+                *,
+                max_workers: Optional[int] = None,
+                use_parallel: bool = False,
                 filters: Optional[List[FilterType]] = None,
                 dry_run: bool = False, 
                 backup_dir: Optional[str] = None, 
                 delete_backups: bool = False,
                 force: bool = False,
-                dynamic_op: Optional[Callable[[str], Any]] = None,
-                verify: bool = True) -> ProcessResultType:
+                verbose: bool = False,
+                verify: bool = True,
+                read_schema: Optional[str] = None) -> ProcessResultType:
     """Process a single file with comprehensive error handling."""
     file_path = Path(path)
     ext = file_path.suffix.lower()
@@ -436,8 +456,9 @@ def process_file(path: str,
         # Use a single context manager to keep file open if possible (or at least centralize handling)
         with SimpleMusic.managed(file_path) as sm:
             # Step 1: Read original fields
-            read_mode = 'extended' if dynamic_op else 'canonical'
-            orig = sm.read_fields(mode=read_mode)
+            # Use provided schema or fall back to default
+            actual_read_schema = read_schema if read_schema else Config.DEFAULT_SCHEMA
+            orig = sm.read_fields(schema=actual_read_schema)
             
             # Step 2: Apply filters
             if not _apply_filters(filters or [], orig):
@@ -451,14 +472,6 @@ def process_file(path: str,
             # Step 3: Compute new fields
             effective_ops = ops.copy()
             effective_targeted_fields = list(targeted_fields)
-            
-            if dynamic_op:
-                for field in orig.keys():
-                    if field not in effective_ops:
-                        op = dynamic_op(field)
-                        if op:
-                            effective_ops[field] = op
-                            effective_targeted_fields.append(field)
             
             new_fields, changed = compute_new_fields(orig, effective_ops, effective_targeted_fields)
             any_changed = any(changed.values())

@@ -2,6 +2,9 @@
 
 **mudio** is a powerful, friendly command-line music metadata editor and Python library. It provides a unified API for handling metadata across MP3, FLAC, M4A, and more, making batch processing and automation simple and safe.
 
+-   **For full command details, see the [CLI Reference](docs/cli_reference.md).**
+-   **For code API details, see the [API Reference](docs/api_reference.md).**
+
 ## Features
 
 -   **Unified API**: Write code once, run it on MP3, FLAC, M4A, WAV, OGG, OPUS, WMA, and WavPack.
@@ -37,17 +40,14 @@ pip install mudio
 ### Basic Commands
 
 ```bash
-# View metadata
-mudio song.mp3 --mode view
-
-# Set Album and Date
-mudio *.mp3 --mode set --album "New Album" --date "2024"
-
 # View metadata (truncated if long)
-mudio song.mp3 --mode print
+mudio song.mp3 --operation print
+
+# Set Album
+mudio *.mp3 --operation set --fields album --value "New Album"
 
 # Overwrite Title
-mudio song.flac --mode overwrite --fields title --value "My Song"
+mudio song.flac --operation set --fields title --value "My Song"
 ```
 
 ### Advanced Batch Operations
@@ -56,30 +56,30 @@ mudio song.flac --mode overwrite --fields title --value "My Song"
 # Regex Find & Replace (Fix features)
 # Changes "feat." -> "ft." in title and artist
 mudio /music --recursive \
-  --mode find-replace --find "feat\." --replace "ft." --regex \
+  --operation find-replace --find "feat\." --replace "ft." --regex \
   --fields title,artist
 
-For full command details, see the [CLI Reference](docs/cli_reference.md).
-For code API details, see the [API Reference](docs/api_reference.md).
-
 # Append to Comment
-mudio *.m4a --mode append --fields comment --value " [Remastered]"
+mudio *.m4a --operation append --fields comment --value " [Remastered]"
 
 # Filtered Processing
 # Only add "Rock" genre to tracks by "Led Zeppelin"
 mudio /library --recursive \
   --filter "artist=Led Zeppelin" \
-  --mode overwrite --fields genre --value "Rock"
+  --operation set --fields genre --value "Rock"
 ```
 
 ### Safety Features
 
 ```bash
 # Dry Run (See what would happen without modifying files)
-mudio *.mp3 --mode set --album "Test" --dry-run
+mudio *.mp3 --operation set --fields album --value "Test" --dry-run
 
-# Create Backups (Saved to ./backups/)
-mudio *.flac --mode clear --fields comment --backup ./backups
+# Create Backups (Kept by default in ./backups/)
+mudio *.flac --operation clear --fields comment --backup ./backups
+
+# Delete backups after successful operation (to save space)
+mudio *.mp3 --operation set --fields album --value "New" --backup ./backups --delete-backups
 ```
 
 ## Python Library Usage
@@ -89,10 +89,17 @@ mudio *.flac --mode clear --fields comment --backup ./backups
 ```python
 from mudio import SimpleMusic
 
-# Reading
+# Reading metadata (extended mode by default - includes custom fields)
 with SimpleMusic("song.flac") as sm:
-    print(sm.read_fields())
+    fields = sm.read_fields()  # Default: schema='extended'
+    print(fields)
     # {'artist': ['The Band'], 'title': ['The Song'], ...}
+
+# Read with different schemas
+with SimpleMusic("song.mp3") as sm:
+    canonical = sm.read_fields(schema='canonical')  # Only standard fields
+    raw = sm.read_fields(schema='raw')  # Format-specific keys (TIT2, TPE1, etc.)
+    extended = sm.read_fields(schema='extended')  # Standard + custom fields
 
 # Writing
 with SimpleMusic("song.mp3") as sm:
@@ -104,11 +111,30 @@ with SimpleMusic("song.mp3") as sm:
 # Error handling is managed by the context manager
 ```
 
+### Environment Variables
+
+You can configure `mudio`'s default behavior using environment variables:
+
+- **`MUDIO_SCHEMA`**: Set default schema for reading metadata (`canonical`, `extended`, or `raw`). Default: `extended`.
+- **`MUDIO_MAX_WORKERS`**: Default thread count for parallel processing.
+- **`MUDIO_BACKUP_DIR`**: Default backup location.
+- **`MUDIO_VERBOSE`**: Default verbosity (`0` or `1`).
+
+```bash
+# Example: Use extended schema by default (canonical + custom fields)
+export MUDIO_SCHEMA=extended
+python your_script.py
+```
+
 ## Comparison with Alternatives
 
 ### vs. **Mutagen**
 -   **Mutagen** is the low-level library that `mudio` uses. It is powerful but requires learning different APIs for ID3, Vorbis, and MP4 tags.
 -   **mudio** abstracts these differences. Use `mudio` if you want a simple, unified API (e.g. `sm.write_fields({'title': ...})` works on everything). Use `mutagen` if you need byte-level control or support for obscure frame types.
+
+### vs. **music_tag**
+-   **music_tag** is a library primarily for Python scripts, offering a dictionary-like interface. It is excellent for simple script usage.
+-   **mudio** offers similar library features but includes a **robust CLI** for batch processing, filtering, and safety operations (backups, dry-runs) out of the box.
 
 ### vs. **Beets**
 -   **Beets** is a complete library manager with a centralized database, autotagger, and plugin system. It implies a workflow where it "owns" your library.
@@ -117,10 +143,6 @@ with SimpleMusic("song.mp3") as sm:
 ### vs. **Picard**
 -   **MusicBrainz Picard** is a GUI application focused on matching files to the MusicBrainz database.
 -   **mudio** is a CLI/Library tool. It's better for automation, headless servers, or mass-editing tags based on patterns rather than database matching.
-
-### vs. **music_tag**
--   **music_tag** is a library primarily for Python scripts, offering a dictionary-like interface. It is excellent for simple script usage.
--   **mudio** offers similar library features but includes a **robust CLI** for batch processing, filtering, and safety operations (backups, dry-runs) out of the box.
 
 ### vs. **EyeD3**
 -   **EyeD3** is excellent but specific to MP3/ID3.

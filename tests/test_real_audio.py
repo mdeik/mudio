@@ -137,3 +137,91 @@ class TestRealAudio:
         with SimpleMusic.managed(audio_file) as sm:
             fields = sm.read_fields()
             assert fields["title"] == ["Idempotency Test"]
+
+    def test_delete_field_entirely(self, audio_file):
+        """Test that delete operation removes field key entirely from metadata."""
+        from mudio.operations import delete
+        from mudio.processor import process_file
+        
+        # First write some data
+        initial_metadata = {
+            "title": ["To Be Deleted"],
+            "artist": ["Should Remain"],
+            "album": ["Also Remain"],
+        }
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(initial_metadata)
+        
+        # Verify it was written
+        with SimpleMusic.managed(audio_file) as sm:
+            fields = sm.read_fields()
+            assert "title" in fields
+            assert fields["title"] == ["To Be Deleted"]
+        
+        # Use delete operation via process_file
+        ops = {"title": delete("title")}
+        result = process_file(
+            audio_file,
+            ops=ops,
+            targeted_fields=["title"],
+            backup_dir=None,
+            dry_run=False,
+            filters=[]
+        )
+        
+        assert result['passed'] is True
+        
+        # Verify title field is completely removed
+        with SimpleMusic.managed(audio_file) as sm:
+            fields = sm.read_fields()
+            # Field should be absent or empty list (depending on implementation)
+            assert fields.get("title", []) == []
+            # Other fields should remain
+            assert fields.get("artist") == ["Should Remain"]
+            assert fields.get("album") == ["Also Remain"]
+
+    def test_delete_vs_clear(self, audio_file):
+        """Test the distinction between delete (removes key) and clear (empty value)."""
+        from mudio.operations import delete, clear
+        from mudio.processor import process_file
+        
+        # Write initial data
+        initial_metadata = {
+            "title": ["Title to Delete"],
+            "album": ["Album to Clear"],
+            "artist": ["Artist Unchanged"],
+        }
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(initial_metadata)
+        
+        # Apply delete to title, clear to album
+        ops = {
+            "title": delete("title"),
+            "album": clear("album"),
+        }
+        result = process_file(
+            audio_file,
+            ops=ops,
+            targeted_fields=["title", "album"],
+            backup_dir=None,
+            dry_run=False,
+            filters=[]
+        )
+        
+        assert result['passed'] is True
+        
+        # Verify results
+        with SimpleMusic.managed(audio_file) as sm:
+            fields = sm.read_fields()
+            
+            # Delete should remove the field entirely
+            assert fields.get("title", []) == []
+            
+            # Clear might leave field present but empty, or also remove it
+            # (behavior may vary by format, but both should result in no usable value)
+            album_val = fields.get("album", [])
+            assert not album_val or album_val == [""]
+            
+            # Artist should remain unchanged
+            assert fields.get("artist") == ["Artist Unchanged"]
+

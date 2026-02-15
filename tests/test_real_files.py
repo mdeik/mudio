@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from mudio import SimpleMusic, op_overwrite
+from mudio import SimpleMusic, overwrite
 from mudio.core import CANONICAL_FIELDS
 
 from mudio.core import FormatError

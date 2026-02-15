@@ -12,13 +12,13 @@ mudio [PATH] [OPTIONS]
 
 ## Global Options
 
-These options apply to all modes.
+These options apply to all operations.
 
 | Option | Description |
 | :--- | :--- |
 | `--recursive` | Recursively search for audio files in subdirectories. |
 | `--ext LIST` | Comma-separated list of extensions to process (e.g. `mp3,flac`). Defaults to all supported types. |
-| `--threads N` | Number of threads to use for parallel processing. |
+| `--threads N` | Number of threads to use for parallel processing. Default: `0` (auto-detect based on CPU count). |
 | `--no-parallel` | Force sequential processing (single-threaded). |
 | `--dry-run` | Simulation mode. Shows what *would* change without modifying files. |
 | `--verbose` | Enable verbose logging and progress output. |
@@ -27,38 +27,38 @@ These options apply to all modes.
 | `--force` | Force operations (e.g. overwrite existing backups). |
 | `--json-report FILE` | Write a detailed processing report to a JSON file. |
 | `--delimiter CHAR` | Delimiter for splitting multi-value fields (default: `;`). |
+| `--schema SCHEMA` | Metadata schema: `canonical`, `extended` (default), or `raw`. |
 
 ---
 
-## Modes
+## Operations
 
-Select an operation mode using `--mode NAME`.
+Select an operation using `--operation NAME`.
 
 ### `set`
-Sets specific metadata fields using a convenient syntax. This is the primary mode for assigning values.
+Sets specific metadata fields using a convenient syntax. This is the primary operation for assigning values.
 *   **Use Case**: Precision editing of standard tags (dates, track numbers) or batch assignment of arbitrary fields.
-*   **Requires**: At least one of `--date`, `--track`, `--total-tracks`, `--disc`, `--total-discs`, or `--fields`+`--value`.
+*   **Requires**: `--fields` and `--value`.
 *   **Arguments**:
-    *   `--date YYYY[-MM-DD]`: Set the date/year.
-    *   `--track N`: Set track number.
-    *   `--total-tracks N`: Set total tracks.
-    *   `--disc N`: Set disc number.
-    *   `--total-discs N`: Set total discs.
-    *   `--fields LIST --value VAL`: Set arbitrary fields to a value.
-*   **Multi-value**: Use `--delimiter` to split values (e.g. `mudio . --mode set --fields genre --value "Rock|Pop" --delimiter "|"`)
+    *   `--fields LIST`: Comma-separated list of fields to set (e.g. `album`, `date`, `track`).
+    *   `--value VAL`: The value to assign to the specified fields.
+*   **Multi-value**: Use `--delimiter` to split values (e.g. `mudio . --operation set --fields genre --value "Rock|Pop" --delimiter "|"`)
+*   **Example**: `mudio . --operation set --fields track --value "1"`
 
 ### `print`
 Prints the metadata of the files to the console in a readable format.
 *   **Options**:
-    *   `--all-fields`: Show all fields, including custom tags and non-canonical metadata.
-    *   `--raw-fields`: Show the raw tag keys from the file (e.g., `TIT2`, `TPE1`) instead of mapped names.
+    *   `--schema SCHEMA`: Metadata schema to use. Choices:
+        - `canonical`: Standard fields only.
+        - `extended`: Standard + custom fields (default).
+        - `raw`: Raw tag keys (e.g. TIT2).
 *   **Behavior**: Long fields (>150 characters) are truncated with `...`.
 *   **Requires**: None.
 
 ### `delete`
 Removes the specified fields entirely from the file (deletes the key).
 *   **Requires**: `--fields`.
-*   **Example**: `mudio . --mode delete --fields comment,lyrics`
+*   **Example**: `mudio . --operation delete --fields comment,lyrics`
 
 ### `clear`
 Sets the specified fields to an empty value (e.g. empty string), without removing the key (if format supports empty tags).
@@ -85,12 +85,12 @@ Prepends a value to the existing field.
 ### `enlist`
 Adds a value to a multi-valued field only if it does not already exist.
 *   **Requires**: `--fields`, `--value`.
-*   **Example**: `mudio . --mode enlist --fields genre --value "Pop"`
+*   **Example**: `mudio . --operation enlist --fields genre --value "Pop"`
 
 ### `delist`
 Removes specific value(s) from a multi-valued field.
 *   **Requires**: `--fields`, `--value`.
-*   **Example**: `mudio . --mode delist --fields genre --value "Rock"`
+*   **Example**: `mudio . --operation delist --fields genre --value "Rock"`
 
 
 ### `find-replace`
@@ -100,7 +100,7 @@ Search and replace text within tags.
     *   `--regex`: Treat the `--find` pattern as a Regular Expression.
 *   **Warning**: If the replacement result contains the delimiter (default `;`), it will be split into multiple values for multi-valued fields.
     *   Example: replacing "and" with ";" in "A and B" results in ["A ", " B"].
-*   **Example**: `mudio . --mode find-replace --fields title --find "feat." --replace "ft."`
+*   **Example**: `mudio . --operation find-replace --fields title --find "feat." --replace "ft."`
 
 ### `purge`
 **DANGER**: Removes ALL metadata tags from the files, leaving them clean.
@@ -113,8 +113,7 @@ Search and replace text within tags.
 Select which fields to operate on using the following arguments:
 
 *   `--fields LIST`: Comma-separated list of specific fields (e.g. `title,artist`).
-*   `--standard-fields`: Target all canonical fields (listed below).
-*   `--all-fields`: Target ALL fields present in the file, including custom tags.
+
 
 These are the canonical field names supported across all audio formats.
 
@@ -175,7 +174,7 @@ Apply changes only to files that match specific criteria using `--filter`.
 Use `--dry-run` to preview changes. The output will show the "Original" state and the "Planned" state for every file, but no files will be modified.
 
 ```bash
-mudio . --mode purge --dry-run
+mudio . --operation purge --dry-run
 ```
 
 ### Backups
@@ -211,7 +210,7 @@ To ensure compilations are grouped correctly:
 
 ```bash
 # Set Album Artist to "Various Artists" and compilation flag (if supported by format)
-mudio . --mode set --fields albumartist --value "Various Artists" --filter "compilation=1"
+mudio . --operation set --fields albumartist --value "Various Artists" --filter "compilation=1"
 ```
 
 ### Normalize Messy Metadata
@@ -224,7 +223,7 @@ Actually, CLI supports regex find-replace:
 
 ```bash
 # Replace underscores with spaces in titles
-mudio . --mode find-replace --fields title --find "_" --replace " "
+mudio . --operation find-replace --fields title --find "_" --replace " "
 ```
 
 ## Version Compatibility

@@ -19,7 +19,7 @@ class TestExitCodes:
     def test_invalid_args_exit_code(self):
         """Test invalid arguments exit code."""
         # Find-replace without --find/--replace
-        args = ['mudio', '.', '--mode', 'find-replace', '--fields', 'title']
+        args = ['mudio', '.', '--operation', 'find-replace', '--fields', 'title']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()
@@ -27,7 +27,7 @@ class TestExitCodes:
 
     def test_invalid_filter_exit_code(self):
         """Test invalid filter syntax exit code."""
-        args = ['mudio', '.', '--mode', 'print', '--filter', 'badfilter']
+        args = ['mudio', '.', '--operation', 'print', '--filter', 'badfilter']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()
@@ -37,7 +37,7 @@ class TestExitCodes:
     def test_interrupt_exit_code(self, mock_run):
         """Test KeyboardInterrupt handling."""
         mock_run.side_effect = KeyboardInterrupt
-        args = ['mudio', '.', '--mode', 'print']
+        args = ['mudio', '.', '--operation', 'print']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()
@@ -49,7 +49,7 @@ class TestExitCodes:
         with patch('os.access', return_value=False):
             # Also patch os.path.exists to return True so we hit the permission check
             with patch('os.path.exists', return_value=True):
-                args = ['mudio', '/protected/path', '--mode', 'print']
+                args = ['mudio', '/protected/path', '--operation', 'print']
                 with patch.object(sys, 'argv', args):
                     with pytest.raises(SystemExit) as exc:
                         main()
@@ -59,7 +59,7 @@ class TestExitCodes:
     def test_generic_exception_exit_code(self, mock_run):
         """Test unhandled exception exit code."""
         mock_run.side_effect = Exception("Unexpected crash")
-        args = ['mudio', '.', '--mode', 'print']
+        args = ['mudio', '.', '--operation', 'print']
         with patch.object(sys, 'argv', args):
              with pytest.raises(SystemExit) as exc:
                 main()
@@ -70,7 +70,7 @@ class TestExitCodes:
         """Test no files found exit code."""
         # Mock collecting no files
         mock_collect.return_value = iter([])
-        args = ['mudio', '.', '--mode', 'print']
+        args = ['mudio', '.', '--operation', 'print']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()
@@ -84,7 +84,7 @@ class TestExitCodes:
         os_err = OSError(errno.ENOSPC, "No space left on device")
         mock_run.side_effect = os_err
         
-        args = ['mudio', '.', '--mode', 'set', '--fields', 'artist', '--value', 'New Artist']
+        args = ['mudio', '.', '--operation', 'set', '--fields', 'artist', '--value', 'New Artist']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()
@@ -106,7 +106,7 @@ class TestExitCodes:
             'exception': os_err
         }]
         
-        args = ['mudio', '.', '--mode', 'print']
+        args = ['mudio', '.', '--operation', 'print']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()

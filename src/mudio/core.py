@@ -168,36 +168,44 @@ class SimpleMusic:
         except (ValueError, TypeError):
             return None
     
-    def read_fields(self, mode: str = 'canonical') -> Dict[str, List[str]]:
+    
+    def read_fields(self, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """
         Read all metadata fields from the file.
         
         Args:
-            mode: 'canonical' (default) - return only standardized fields.
+            schema: 'canonical' - return only standardized fields.
                   'raw' - return all fields with native keys.
                   'extended' - return canonical fields plus any other fields found.
+                  None (default) - use Config.DEFAULT_SCHEMA.
         """
+        if schema is None:
+            # New config class might not be imported yet if circular import risk,
+            # but standard import should work.
+            from .utils import Config
+            schema = Config.DEFAULT_SCHEMA
+
         if self.mfile is None or self.mfile.tags is None:
-            return {k: [] for k in CANONICAL_FIELDS} if mode == 'canonical' else {}
+            return {k: [] for k in CANONICAL_FIELDS} if schema == 'canonical' else {}
 
         # MP4 / M4A
         if isinstance(self.mfile, mp4.MP4):
-            return self._read_mp4_fields(self.mfile.tags, mode=mode)
+            return self._read_mp4_fields(self.mfile.tags, schema=schema)
         
         # ID3 (MP3/WAV with ID3v2 tags)
         if isinstance(self.mfile.tags, id3.ID3):
-            return self._read_id3_fields(self.mfile.tags, mode=mode)
+            return self._read_id3_fields(self.mfile.tags, schema=schema)
         
         # FLAC files
         if isinstance(self.mfile, flac.FLAC):
-            return self._read_flac_fields(self.mfile.tags, mode=mode)
+            return self._read_flac_fields(self.mfile.tags, schema=schema)
         
         # Other formats (Ogg, Opus, WMA, WV, etc.)
-        return self._read_easy_tags(self.mfile.tags, mode=mode)
+        return self._read_easy_tags(self.mfile.tags, schema=schema)
     
-    def _read_mp4_fields(self, tags: Any, mode: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_mp4_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
         """Read fields from MP4/M4A files."""
-        if mode == 'raw':
+        if schema == 'raw':
             # Just dump what we have
             return {str(k): [str(v) for v in vals] if isinstance(vals, list) else [str(vals)] 
                     for k, vals in tags.items()}
@@ -262,7 +270,7 @@ class SimpleMusic:
                 logger.debug(f"Failed to parse MP4 disc number: {e}")
                 pass
                 
-        if mode == 'extended':
+        if schema == 'extended':
             # Add other atoms
             # Mappped atom keys
             mapped = {'\xa9nam', '\xa9ART', '\xa9alb', 'aART', '\xa9gen', 
@@ -283,13 +291,21 @@ class SimpleMusic:
                                 outvals.append(str(v))
                         else:
                             outvals.append(str(v))
-                    out[k] = outvals
+                    
+                    # Clean key
+                    clean_key = k
+                    if k.startswith('----:com.apple.iTunes:'):
+                        clean_key = k[len('----:com.apple.iTunes:'):]
+                    elif k.startswith('----:'):
+                        clean_key = k[len('----:'):]
+                        
+                    out[clean_key] = outvals
         
         return out
     
-    def _read_id3_fields(self, tags: id3.ID3, mode: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_id3_fields(self, tags: id3.ID3, schema: str = 'canonical') -> Dict[str, List[str]]:
         """Read fields from ID3 files (MP3/WAV)."""
-        if mode == 'raw':
+        if schema == 'raw':
             # Raw mode: dump all frames
             out = {}
             for key, frame in tags.items():
@@ -338,9 +354,9 @@ class SimpleMusic:
                 if desc in ('performer', 'performers', 'perf'):
                     out['performer'].extend([str(x) for x in getattr(tx, 'text', [])])
                 
-                # Extended mode: add TXXX frames that aren't performer
-                if mode == 'extended' and desc not in ('performer', 'performers', 'perf'):
-                     out[f"TXXX:{desc}"] = [str(x) for x in getattr(tx, 'text', [])]
+                # Extended schema: add TXXX frames that aren't performer
+                if schema == 'extended' and desc not in ('performer', 'performers', 'perf'):
+                     out[desc] = [str(x) for x in getattr(tx, 'text', [])]
             except Exception as e:
                 logger.debug(f"Failed to parse ID3 TXXX frame: {e}")
                 continue
@@ -364,7 +380,7 @@ class SimpleMusic:
             if len(parts) > 1 and parts[1].strip(): 
                 out['totaldiscs'] = [parts[1].strip()]
                 
-        if mode == 'extended':
+        if schema == 'extended':
             # Add other frames not covered by canonical
             known_frames = {'TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'COMM', 'TCOM', 
                            'TPE3', 'TXXX', 'TDRC', 'TORY', 'TDAT', 'TRCK', 'TPOS'}
@@ -388,9 +404,9 @@ class SimpleMusic:
                     
         return out
     
-    def _read_flac_fields(self, tags: Any, mode: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_flac_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
         """Read fields from FLAC files."""
-        if mode == 'raw':
+        if schema == 'raw':
             # Vorbis comments are practically a dict already
             return {k: [str(v) for v in vals] for k, vals in tags.items()}
 
@@ -443,7 +459,7 @@ class SimpleMusic:
         if dt:
             out['totaldiscs'] = [dt[0]]
             
-        if mode == 'extended':
+        if schema == 'extended':
             mapped_keys = {'title', 'artist', 'album', 'albumartist', 'albumartist_sort',
                           'genre', 'genres', 'comment', 'comments', 'composer', 
                           'performer', 'performers', 'date', 'originaldate', 'year',
@@ -456,9 +472,9 @@ class SimpleMusic:
                     
         return out
     
-    def _read_easy_tags(self, tags: Any, mode: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_easy_tags(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
         """Read fields from other formats (Ogg, Opus, WMA, WV, etc.)."""
-        if mode == 'raw':
+        if schema == 'raw':
             # Just dump what we have
             return {str(k): [str(v) for v in vals] if isinstance(vals, list) else [str(vals)] 
                     for k, vals in tags.items()}
@@ -514,7 +530,7 @@ class SimpleMusic:
         if dt:
             out['totaldiscs'] = [dt[0]]
             
-        if mode == 'extended':
+        if schema == 'extended':
              mapped_keys = {'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
                            'composer', 'performer', 'date', 'tracknumber', 'track', 'tracktotal', 
                            'totaltracks', 'discnumber', 'disc', 'disctotal', 'totaldiscs'}
