@@ -28,6 +28,7 @@ These options apply to all operations.
 | `--json-report FILE` | Write a detailed processing report to a JSON file. |
 | `--delimiter CHAR` | Delimiter for splitting multi-value fields (default: `;`). |
 | `--schema SCHEMA` | Metadata schema: `canonical`, `extended` (default), or `raw`. |
+| `--namespace NS` | Namespace for custom MP4 fields (env: `MUDIO_NAMESPACE`). Default: `com.apple.iTunes`. |
 
 ---
 
@@ -35,15 +36,15 @@ These options apply to all operations.
 
 Select an operation using `--operation NAME`.
 
-### `set`
-Sets specific metadata fields using a convenient syntax. This is the primary operation for assigning values.
+### `write`
+Writes specific metadata fields using a convenient syntax. This is the primary operation for assigning values.
 *   **Use Case**: Precision editing of standard tags (dates, track numbers) or batch assignment of arbitrary fields.
 *   **Requires**: `--fields` and `--value`.
 *   **Arguments**:
     *   `--fields LIST`: Comma-separated list of fields to set (e.g. `album`, `date`, `track`).
     *   `--value VAL`: The value to assign to the specified fields.
-*   **Multi-value**: Use `--delimiter` to split values (e.g. `mudio . --operation set --fields genre --value "Rock|Pop" --delimiter "|"`)
-*   **Example**: `mudio . --operation set --fields track --value "1"`
+*   **Multi-value**: Use `--delimiter` to split values (e.g. `mudio . --operation write --fields genre --value "Rock|Pop" --delimiter "|"`)
+*   **Example**: `mudio . --operation write --fields track --value "1"`
 
 ### `print`
 Prints the metadata of the files to the console in a readable format.
@@ -61,7 +62,7 @@ Removes the specified fields entirely from the file (deletes the key).
 *   **Example**: `mudio . --operation delete --fields comment,lyrics`
 
 ### `clear`
-Sets the specified fields to an empty value (e.g. empty string), without removing the key (if format supports empty tags).
+Writes the specified fields to an empty value (e.g. empty string), without removing the key (if format supports empty tags).
 *   **Requires**: `--fields`.
 *   **Use Case**: When you want to blank out a field but keep the tag present (rare, usually `delete` is preferred).
 *   **Note**: Behavior of empty values varies by format. ID3 tags may store empty frames; Vorbis comments typically omit empty values.
@@ -141,7 +142,13 @@ You are not limited to the canonical fields above. You can read and write **any*
 *   **Storage**:
     *   **MP3 (ID3)**: `TXXX:MY_CUSTOM_TAG`
     *   **FLAC/Vorbis**: `MY_CUSTOM_TAG=Value`
-    *   **MP4**: `----:com.apple.iTunes:MY_CUSTOM_TAG`
+    *   **MP4**: `----:com.apple.iTunes:MY_CUSTOM_TAG` (Namespace is configurable via `MUDIO_NAMESPACE`)
+
+### Key Sanitization
+
+*   **Reading**: Custom keys are read as **small snake case** (e.g., `MY_TAG` -> `my_tag`).
+*   **Writing**: Custom keys are written as **caps snake case** (e.g., `my_tag` -> `MY_TAG`).
+*   **Deduplication**: Alternative casing is dropped to prevent duplicates.
 
 
 
@@ -196,8 +203,6 @@ Use `--backup PATH` to save copies of files before they are modified.
 *   Ogg Vorbis (`.ogg`)
 *   Opus (`.opus`)
 *   WAV (`.wav`) - *ID3 chunks in WAV*
-*   WMA (`.wma`)
-*   WavPack (`.wv`)
 
 ## Common Patterns
 
@@ -210,7 +215,7 @@ To ensure compilations are grouped correctly:
 
 ```bash
 # Set Album Artist to "Various Artists" and compilation flag (if supported by format)
-mudio . --operation set --fields albumartist --value "Various Artists" --filter "compilation=1"
+mudio . --operation write --fields albumartist --value "Various Artists" --filter "compilation=1"
 ```
 
 ### Normalize Messy Metadata

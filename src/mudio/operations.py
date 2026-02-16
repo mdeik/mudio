@@ -93,9 +93,9 @@ def find_replace(field_name: str, find: str, replace: str, regex: bool = False, 
     
     return op
 
-def overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
+def write(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
-    Create an overwrite operation that completely replaces field values.
+    Create a write operation that creates or overwrites the field with the given value(s).
     
     Args:
         field_name: Name of the field being operated on
@@ -107,12 +107,12 @@ def overwrite(field_name: str, value_str: str, delimiter: str = ';') -> Callable
     
     Examples:
         Set single value:
-        >>> op = overwrite('title', 'New Title')
+        >>> op = write('title', 'New Title')
         >>> op(['Old Title'])
         ['New Title']
         
         Set multiple artists:
-        >>> op = overwrite('artist', 'Artist A;Artist B', delimiter=';')
+        >>> op = write('artist', 'Artist A;Artist B', delimiter=';')
         >>> op(['Old Artist'])
         ['Artist A', 'Artist B']
     """
@@ -355,7 +355,7 @@ def compute_new_fields(orig_fields: FieldValuesType,
     
     Example:
         >>> orig = {'title': ['Old'], 'artist': ['John']}
-        >>> ops = {'title': overwrite('title', 'New')}
+        >>> ops = {'title': write('title', 'New')}
         >>> new, changed = compute_new_fields(orig, ops, ['title', 'artist'])
         >>> changed
         {'title': True, 'artist': False}

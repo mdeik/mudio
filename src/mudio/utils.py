@@ -36,6 +36,7 @@ class Config:
     PROGRESS_LOCK = Lock()
 
     DEFAULT_SCHEMA = 'extended'
+    DEFAULT_NAMESPACE = 'com.apple.iTunes'
     
     @classmethod
     def validate(cls) -> None:
@@ -52,6 +53,8 @@ class Config:
             raise ValueError("MIN_FILES_FOR_PARALLEL must be positive")
         if cls.DEFAULT_SCHEMA not in ('canonical', 'extended', 'raw'):
             raise ValueError(f"Invalid DEFAULT_SCHEMA: {cls.DEFAULT_SCHEMA}")
+        if not cls.DEFAULT_NAMESPACE:
+            raise ValueError("DEFAULT_NAMESPACE cannot be empty")
     
     @classmethod
     def load_from_env(cls) -> None:
@@ -66,6 +69,8 @@ class Config:
             cls.MIN_FILES_FOR_PARALLEL = int(os.getenv('MUDIO_MIN_PARALLEL'))
         if os.getenv('MUDIO_SCHEMA'):
             cls.DEFAULT_SCHEMA = os.getenv('MUDIO_SCHEMA')
+        if os.getenv('MUDIO_NAMESPACE'):
+            cls.DEFAULT_NAMESPACE = os.getenv('MUDIO_NAMESPACE')
         cls.validate()
 
 # Thread-safe output helpers

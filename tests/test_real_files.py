@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from mudio import SimpleMusic, overwrite
+from mudio import SimpleMusic, write
 from mudio.core import CANONICAL_FIELDS
 
 from mudio.core import FormatError
@@ -24,5 +24,5 @@ def test_read_all_formats(all_format_files):
 def test_format_coverage(all_format_files):
     """Verify we have all expected formats."""
     found_formats = {f.suffix.lower() for f in all_format_files}
-    expected = {'.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus', '.wma', '.wv'}
+    expected = {'.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus'}
     assert found_formats == expected

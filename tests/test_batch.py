@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from mudio.batch import process_batch, set_fields
-from mudio.operations import overwrite, append
+from mudio.operations import write, append
 import tempfile
 import shutil
 import logging
@@ -15,7 +15,7 @@ def test_process_batch_basic(temp_audio_dir):
     """Test basic batch processing."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title'],
         dry_run=True
     )
@@ -32,7 +32,7 @@ def test_process_batch_recursive(temp_audio_dir):
     """Test recursive file collection."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title'],
         recursive=True,
         dry_run=True
@@ -45,7 +45,7 @@ def test_process_batch_extension_filter(temp_audio_dir):
     """Test file extension filtering."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title'],
         extensions=['.mp3'],
         dry_run=True
@@ -62,7 +62,7 @@ def test_process_batch_empty_directory(tmp_path):
     
     result = process_batch(
         empty_dir,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title']
     )
     
@@ -73,7 +73,7 @@ def test_process_batch_nonexistent_path():
     """Test handling of non-existent path."""
     result = process_batch(
         "/nonexistent/path",
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title']
     )
     
@@ -88,7 +88,7 @@ def test_process_batch_no_matching_files(tmp_path):
     
     result = process_batch(
         dir_with_txt,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title']
     )
     
@@ -99,7 +99,7 @@ def test_process_batch_with_filters(temp_audio_dir):
     """Test batch processing with filters - adjust expectations for dummy files."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'Filtered Title')},
+        operations={'title': write('title', 'Filtered Title')},
         fields=['title'],
         filters=[('artist', 'NonExistentArtist', False)],  # Filter that matches nothing
         dry_run=True
@@ -116,7 +116,7 @@ def test_process_batch_backup_creation(temp_audio_dir, tmp_path):
     
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'New Title')},
+        operations={'title': write('title', 'New Title')},
         fields=['title'],
         backup_dir=backup_dir,
         dry_run=True
@@ -140,7 +140,7 @@ def test_process_batch_parallel_parameter(temp_audio_dir):
         # Verify no errors with parallel parameters
         result = process_batch(
             temp_audio_dir,
-            operations={'title': overwrite('title', 'New Title')},
+            operations={'title': write('title', 'New Title')},
             fields=['title'],
             max_workers=4,
             use_parallel=True,
@@ -185,7 +185,7 @@ def test_process_batch_verbose_logging(temp_audio_dir, caplog):
     with caplog.at_level(logging.INFO):
         result = process_batch(
             temp_audio_dir,
-            operations={'title': overwrite('title', 'New Title')},
+            operations={'title': write('title', 'New Title')},
             fields=['title'],
             verbose=True,
             dry_run=True
@@ -199,7 +199,7 @@ def test_process_batch_force_parameter(temp_audio_dir):
     """Test force parameter handling."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': overwrite('title', 'Forced Title')},
+        operations={'title': write('title', 'Forced Title')},
         fields=['title'],
         force=True,
         dry_run=True

@@ -63,17 +63,17 @@ class TestCLIArguments:
         assert "title" in targeted_fields
         assert "artist" in targeted_fields
 
-    def test_set_mode_requirements_fail(self, dummy_file):
-        """Test set operation validation failure."""
-        with patch.object(sys, 'argv', ["mudio", str(dummy_file), "--operation", "set"]):
+    def test_write_mode_requirements_fail(self, dummy_file):
+        """Test write operation validation failure."""
+        with patch.object(sys, 'argv', ["mudio", str(dummy_file), "--operation", "write"]):
             with pytest.raises(SystemExit):
                 main()
 
-    def test_set_mode_requirements_pass(self, dummy_file):
-        """Test set operation validation success."""
+    def test_write_mode_requirements_pass(self, dummy_file):
+        """Test write operation validation success."""
         with patch('mudio.cli.run_processing_session') as mock_process:
             mock_process.return_value = 0
-            with patch.object(sys, 'argv', ["mudio", str(dummy_file), "--operation", "set", "--fields", "track", "--value", "1"]):
+            with patch.object(sys, 'argv', ["mudio", str(dummy_file), "--operation", "write", "--fields", "track", "--value", "1"]):
                 with pytest.raises(SystemExit) as exc:
                     main()
             assert exc.value.code == 0

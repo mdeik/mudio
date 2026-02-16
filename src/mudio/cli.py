@@ -29,7 +29,7 @@ from .operations import (
     FieldOperationsType, 
     FieldValuesType, 
     FilterType,
-    overwrite,
+    write,
     find_replace,
     append,
     prefix,
@@ -56,14 +56,14 @@ def validate_args(args: argparse.Namespace) -> None:
     
     # Validate mode and required parameters
     # Validate operation and required parameters
-    if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'set', 'clear', 'delete', 'delist', 'purge'):
+    if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'write', 'clear', 'delete', 'delist', 'purge'):
         if args.operation == 'find-replace' and (args.find is None or args.replace is None):
             errors.append("find-replace operation requires --find and --replace")
         if args.operation in ('append', 'prefix', 'enlist', 'delist') and args.value is None:
             errors.append(f"{args.operation} operation requires --value")
-        if args.operation == 'set':
+        if args.operation == 'write':
             if not (args.fields and args.value):
-                errors.append("set operation requires --fields and --value")
+                errors.append("write operation requires --fields and --value")
         if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete') and not args.fields:
             errors.append(f"{args.operation} operation requires --fields")
     
@@ -98,8 +98,8 @@ def main() -> None:
         
         # Core arguments
         parser.add_argument("path", nargs='?', default='.', help="Directory or file to process")
-        parser.add_argument("--operation", choices=['find-replace','append','prefix','enlist','delist','set','clear','delete','purge','print'], 
-                        required=False, help="Operation (use 'set' for metadata assignment, 'clear' to empty, 'delete' to remove)")
+        parser.add_argument("--operation", choices=['find-replace','append','prefix','enlist','delist','write','clear','delete','purge','print'], 
+                        required=False, help="Operation (use 'write' for metadata assignment, 'clear' to empty, 'delete' to remove)")
         
         # Threading and performance
         parser.add_argument(
@@ -120,7 +120,7 @@ def main() -> None:
         
         parser.add_argument("--find", help="Find string or pattern (for find-replace)")
         parser.add_argument("--replace", help="Replacement string (for find-replace)")
-        parser.add_argument("--value", help="Value for set/append/prefix/add operations")
+        parser.add_argument("--value", help="Value for write/append/prefix/add operations")
         parser.add_argument("--regex", action='store_true', help="Treat 'find' as regex")
         parser.add_argument("--delimiter", default=";", help="Delimiter for splitting multi-value fields (default: ';')")
         
@@ -248,18 +248,18 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperation
     
     # 3. Create operations for explicitly targeted fields
     # 3. Create operations for explicitly targeted fields
-    if args.operation == 'set':
-        # Apply value to other targeted fields in set operation
+    if args.operation == 'write':
+        # Apply value to other targeted fields in write operation
         if args.value and targeted_fields:
              for field in targeted_fields:
                  if field not in ops:
-                     ops[field] = overwrite(field, args.value, delimiter=delimiter)
+                     ops[field] = write(field, args.value, delimiter=delimiter)
 
     elif args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete'):
         for field in targeted_fields:
             if args.operation == 'find-replace':
                 ops[field] = find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter)
-            # overwrite operation removed, functionality merged into set
+            # write operation removed, functionality merged into set
             elif args.operation == 'append':
                 ops[field] = append(field, args.value, delimiter=delimiter)
             elif args.operation == 'prefix':

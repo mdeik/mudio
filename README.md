@@ -7,7 +7,7 @@
 
 ## Features
 
--   **Unified API**: Write code once, run it on MP3, FLAC, M4A, WAV, OGG, OPUS, WMA, and WavPack.
+-   **Unified API**: Write code once, run it on MP3, FLAC, M4A, WAV, OGG, OPUS, and WavPack.
 -   **Batch Processing**: robust CLI for processing thousands of files.
 -   **Parallel Execution**: Automatically uses multi-threading for large batches.
 -   **Safety First**: Built-in **backup** system, **dry-run** mode, and careful validation.
@@ -24,8 +24,6 @@
 -   **Ogg Vorbis** (`.ogg`)
 -   **Opus** (`.opus`)
 -   **WAV** (`.wav`)
--   **Windows Media Audio** (`.wma`)
--   **WavPack** (`.wv`)
 
 ## Installation
 
@@ -44,10 +42,10 @@ pip install mudio
 mudio song.mp3 --operation print
 
 # Set Album
-mudio *.mp3 --operation set --fields album --value "New Album"
+mudio *.mp3 --operation write --fields album --value "New Album"
 
 # Overwrite Title
-mudio song.flac --operation set --fields title --value "My Song"
+mudio song.flac --operation write --fields title --value "My Song"
 ```
 
 ### Advanced Batch Operations
@@ -66,20 +64,20 @@ mudio *.m4a --operation append --fields comment --value " [Remastered]"
 # Only add "Rock" genre to tracks by "Led Zeppelin"
 mudio /library --recursive \
   --filter "artist=Led Zeppelin" \
-  --operation set --fields genre --value "Rock"
+  --operation write --fields genre --value "Rock"
 ```
 
 ### Safety Features
 
 ```bash
 # Dry Run (See what would happen without modifying files)
-mudio *.mp3 --operation set --fields album --value "Test" --dry-run
+mudio *.mp3 --operation write --fields album --value "Test" --dry-run
 
 # Create Backups (Kept by default in ./backups/)
 mudio *.flac --operation clear --fields comment --backup ./backups
 
 # Delete backups after successful operation (to save space)
-mudio *.mp3 --operation set --fields album --value "New" --backup ./backups --delete-backups
+mudio *.mp3 --operation write --fields album --value "New" --backup ./backups --delete-backups
 ```
 
 ## Python Library Usage
@@ -119,6 +117,7 @@ You can configure `mudio`'s default behavior using environment variables:
 - **`MUDIO_MAX_WORKERS`**: Default thread count for parallel processing.
 - **`MUDIO_BACKUP_DIR`**: Default backup location.
 - **`MUDIO_VERBOSE`**: Default verbosity (`0` or `1`).
+- **`MUDIO_NAMESPACE`**: Namespace for custom MP4/M4A fields (default: `com.apple.iTunes`). Setting this to something else (e.g. `org.myproject`) allows isolating your custom tags.
 
 ```bash
 # Example: Use extended schema by default (canonical + custom fields)
@@ -128,15 +127,30 @@ python your_script.py
 
 ## Behavior Notes
 
-### MP3 Comment and Performer Handling
-To ensure metadata consistency, `mudio` applies specific logic when reading and writing MP3 comments (`COMM`) and Performer tags (`TPE3` / `TXXX:PERFORMER`):
--   **Reading**:
-    -   **Identical Frames**: If multiple frames satisfy the same description/type and have *identical content* (case-sensitive), they are deduplicated (e.g. `['a']` + `['a']` -> `['a']`).
-    -   **Intra-Frame Duplicates**: Duplicates *within* a single frame are preserved (e.g. `['a', 'b', 'b']` -> `['a', 'b', 'b']`).
-    -   **Distinct Frames**: Different frames are preserved (e.g. `['a']` + `['b']` -> `['a', 'b']`).
--   **Writing**:
-    -   **Comments**: All comment values are **collapsed** into a single `COMM` frame.
-    -   **Performers**: All performer values are written to standard `TPE3` frames (and `TXXX:PERFORMER` if needed), ensuring no duplication between standard and custom tag fields.
+### Canonical Field Handling (All Formats)
+
+`mudio` normalizes metadata to a **case-insensitive canonical schema** and applies consistent frame/value rules across formats.
+
+#### Reading
+
+* **Canonical keys**: Raw tags that differ only by case or alias are merged into one canonical field (e.g., `GENRE`, `genre` → `genre`; ReplayGain variants collapse).
+* **Frame-level deduplication**: If multiple frames for a canonical field contain the *same ordered list of values* (after normalization), only the first is kept.
+* **Intra-frame duplicates**: Duplicates *within* a single frame are preserved.
+* **Distinct frames**: Frames with different value sequences are preserved and flattened in first-seen order.
+* **Unknown fields**: Unrecognized keys are normalized (lowercase) and preserved.
+* **Key Sanitization**:
+    * **Reading**: Keys are sanitized to **small snake case** (`[a-z0-9_]`). Non-alphanumeric characters are replaced with `_`.
+    * **Writing**: Custom keys are sanitized to **caps snake case** (`[A-Z0-9_]`). Non-alphanumeric characters are replaced with `_`.
+    * **Alternative Casing**: `mudio` drops alternative casing for custom fields to prevent duplicates (e.g., `MyField` and `myfield` are treated as the same field).
+
+#### Writing
+
+* **Canonical-only state**: Input keys are normalized and merged before write.
+* **Single emission per field**: Each canonical field is written once via the format-specific emitter (e.g., ID3 frames, Vorbis comments, MP4 atoms). Aliases are not written.
+* **Value collapse**: All values for a canonical field are emitted according to the target format’s conventions (including required frames/atoms), without duplicating equivalent aliases.
+* **Deterministic output**: Ordering reflects first occurrence after merge and deduplication.
+
+This ensures consistent behavior across file types while preventing casing/alias duplicates.
 
 ## Comparison with Alternatives
 

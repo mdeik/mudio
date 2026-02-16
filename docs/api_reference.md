@@ -102,13 +102,13 @@ Batch processes multiple files. Automatically chooses between sequential and par
 **Example:**
 ```python
 from mudio.processor import process_files
-from mudio.operations import overwrite
+from mudio.operations import write
 from pathlib import Path
 
 files = Path('/music').glob('*.mp3')
 results = process_files(
     files,
-    ops={'album': overwrite('album', 'Greatest Hits')},
+    ops={'album': write('album', 'Greatest Hits')},
     targeted_fields=['album'],
     max_workers=4,
     backup_dir='./backups'
@@ -153,9 +153,9 @@ result = op(['Demo Track'])  # Returns ['Final Track']
 
 All operations return `Callable[[List[str]], List[str]]` - a function that transforms field values.
 
-*   **`overwrite(field, value, delimiter=';')`**: Replaces existing values completely
+*   **`write(field, value, delimiter=';')`**: Creates or overwrites the field with the given value(s)
     - Splits strings on `delimiter` for multi-valued fields
-    - Example: `overwrite('album', 'Greatest Hits')` 
+    - Example: `write('album', 'Greatest Hits')` 
 
 *   **`append(field, value, delimiter=';')`**: Adds to existing values
     - Single-valued fields: Appends string to existing value
@@ -250,6 +250,10 @@ Reads metadata from the file.
 - **Returns**: Dictionary where keys are field names and values are **lists of strings**
   - All values are lists for consistency, even single-valued fields
   - See `FieldOperations` for which fields are semantically single vs. multi-valued
+  - **Key Sanitization**:
+    - **Read**: Keys are normalized to **small snake case** (`[a-z0-9_]`).
+    - **Write**: Custom keys are normalized to **caps snake case** (`[A-Z0-9_]`).
+    - **Normalization**: Drops alternative casing to prevent duplicates.
 
 **`SimpleMusic.write_fields(fields: Dict[str, List[str]])`**
 
@@ -282,6 +286,7 @@ Global configuration settings loaded from environment variables:
 - `MUDIO_MAX_WORKERS`: Default thread count for parallel processing
 - `MUDIO_BACKUP_DIR`: Default backup location
 - `MUDIO_VERBOSE`: Default verbosity (`0` or `1`)
+- `MUDIO_NAMESPACE`: Default namespace for MP4/M4A custom fields (default: `com.apple.iTunes`)
 
 ```python
 from mudio.utils import Config

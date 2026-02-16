@@ -84,7 +84,7 @@ class TestExitCodes:
         os_err = OSError(errno.ENOSPC, "No space left on device")
         mock_run.side_effect = os_err
         
-        args = ['mudio', '.', '--operation', 'set', '--fields', 'artist', '--value', 'New Artist']
+        args = ['mudio', '.', '--operation', 'write', '--fields', 'artist', '--value', 'New Artist']
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()

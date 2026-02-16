@@ -6,13 +6,14 @@ from .core import SimpleMusic, CANONICAL_FIELDS, SUPPORTED_EXT, managed_simple_m
 from .utils import Config
 from .operations import (
     FieldOperations,
-    overwrite,
+    write,
     find_replace,
     append,
     prefix,
     enlist,
     delist,
     clear,
+    delete,
     compute_new_fields,
     apply_filter
 )
@@ -26,13 +27,14 @@ __all__ = [
     "managed_simple_music",
     "Config",
     "FieldOperations",
-    "overwrite",
+    "write",
     "find_replace",
     "append",
     "prefix",
     "enlist",
     "delist",
     "clear",
+    "delete",
     "compute_new_fields",
     "apply_filter",
     "process_file",

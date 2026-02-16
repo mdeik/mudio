@@ -307,16 +307,25 @@ def safe_file_copy(src: Path, dst: Path, exclusive: bool = False) -> bool:
     
     return True
 
-def verify_written(path: Path, expected_fields: FieldValuesType) -> Dict[str, bool]:
+def verify_written(path: Path, expected_fields: FieldValuesType, read_schema: Optional[str] = None) -> Dict[str, bool]:
     """Verify that fields were written correctly."""
     try:
         with SimpleMusic.managed(path) as sm:
-            reloaded = sm.read_fields()
+            # Use provided schema or default
+            actual_schema = read_schema if read_schema else Config.DEFAULT_SCHEMA
+            reloaded = sm.read_fields(schema=actual_schema)
             results = {}
             
             for field, expected in expected_fields.items():
                 expected_norm = FieldOperations.normalize_values(field, expected)
-                got_norm = FieldOperations.normalize_values(field, reloaded.get(field, []))
+                # Try exact key, then lowercase key
+                got_values = reloaded.get(field)
+                if got_values is None:
+                    got_values = reloaded.get(field.lower())
+                if got_values is None:
+                    got_values = reloaded.get(field.upper(), [])
+                
+                got_norm = FieldOperations.normalize_values(field, got_values)
                 
                 if field in ('track', 'disc', 'totaltracks', 'totaldiscs'):
                     try:
@@ -470,9 +479,31 @@ def process_file(path: str,
                 }
             
             # Step 3: Compute new fields
-            effective_ops = ops.copy()
-            effective_targeted_fields = list(targeted_fields)
+            # Match targeted fields to existing fields case-insensitively where possible
+            # This handles formats like FLAC that normalize keys to lowercase
+            effective_ops = {}
+            effective_targeted_fields = []
             
+            orig_keys_lower = {k.lower(): k for k in orig.keys()}
+            
+            for field in targeted_fields:
+                # 1. Exact match
+                if field in orig:
+                    effective_targeted_fields.append(field)
+                    if field in ops:
+                        effective_ops[field] = ops[field]
+                # 2. Case-insensitive match to existing field
+                elif field.lower() in orig_keys_lower:
+                    actual_key = orig_keys_lower[field.lower()]
+                    effective_targeted_fields.append(actual_key)
+                    if field in ops:
+                        effective_ops[actual_key] = ops[field]
+                # 3. New / Non-existent field (keep original casing)
+                else:
+                    effective_targeted_fields.append(field)
+                    if field in ops:
+                        effective_ops[field] = ops[field]
+
             new_fields, changed = compute_new_fields(orig, effective_ops, effective_targeted_fields)
             any_changed = any(changed.values())
             
@@ -519,7 +550,11 @@ def process_file(path: str,
             # Step 6: Verify (optional)
             if verify:
                 try:
-                    record['verified'] = verify_written(file_path, {k: new_fields[k] for k in effective_targeted_fields})
+                    record['verified'] = verify_written(
+                        file_path, 
+                        {k: new_fields[k] for k in effective_targeted_fields},
+                        read_schema=actual_read_schema
+                    )
                     record['passed'] = all(record['verified'].values())
                     
                     if not record['passed']:

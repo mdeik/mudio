@@ -35,9 +35,9 @@ def audio_file(request, tmp_path):
 class TestCLIIntegration:
     """End-to-end CLI integration tests using real audio files."""
 
-    def test_cli_overwrite(self, audio_file):
+    def test_cli_write(self, audio_file):
         """Test simple overwrite via CLI."""
-        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "set", "--fields", "title", "--value", "CLI Title"]):
+        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "write", "--fields", "title", "--value", "CLI Title"]):
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -49,7 +49,7 @@ class TestCLIIntegration:
     def test_cli_set_numeric(self, audio_file):
         """Test setting numeric fields (track)."""
         # Note: can only set one value at a time with current CLI implementation
-        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "set", "--fields", "track", "--value", "5"]):
+        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "write", "--fields", "track", "--value", "5"]):
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -60,8 +60,8 @@ class TestCLIIntegration:
 
     def test_cli_set_numeric_explicit(self, audio_file):
          """Test setting numeric field with explicit value as requested."""
-         # Specifically testing: --operation set --fields track --value "1"
-         with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "set", "--fields", "track", "--value", "1"]):
+         # Specifically testing: --operation write --fields track --value "1"
+         with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "write", "--fields", "track", "--value", "1"]):
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -70,13 +70,13 @@ class TestCLIIntegration:
             fields = sm.read_fields()
             assert fields['track'] == ['1']
 
-    def test_cli_overwrite_with_schema(self, audio_file):
+    def test_cli_write_with_schema(self, audio_file):
         """Test modification operation with explicit schema."""
         # Using 'canonical' schema to modify a field. 
         # 'raw' schema failure on MP4 is expected because verification looks for 'title' but gets '©nam'.
         # 'canonical' schema ensures we get 'title' back, satisfying verification.
         
-        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "set", "--fields", "title", "--value", "Schema Title", "--schema", "canonical"]):
+        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "write", "--fields", "title", "--value", "Schema Title", "--schema", "canonical"]):
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -230,7 +230,7 @@ class TestCLIIntegration:
         
         # Use --force to ensure backup is not deleted after success
         # Need to include --force in the arguments list properly
-        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "set", "--fields", "title", "--value", "Changed", "--backup", str(backup_dir), "--force"]):
+        with patch.object(sys, 'argv', ["mudio", str(audio_file), "--operation", "write", "--fields", "title", "--value", "Changed", "--backup", str(backup_dir), "--force"]):
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
@@ -267,7 +267,7 @@ class TestCLIValidation:
         test_file = tmp_path / "test.mp3"
         test_file.touch()
         # Invalid filter syntax
-        args = ["mudio", str(test_file), "--operation", "set", "--fields", "title", "--value", "X", "--filter", "badfilter"]
+        args = ["mudio", str(test_file), "--operation", "write", "--fields", "title", "--value", "X", "--filter", "badfilter"]
         with patch.object(sys, 'argv', args):
             with pytest.raises(SystemExit) as exc:
                 main()

@@ -21,7 +21,7 @@ from mudio.processor import (
     register_signal_handlers,
     unregister_signal_handlers
 )
-from mudio import overwrite, SimpleMusic
+from mudio import write, SimpleMusic
 from mudio.utils import Config
 
 
@@ -172,7 +172,7 @@ class TestProcessFile:
         with patch('mudio.processor.safe_file_copy') as mock_copy:
             result = process_file(
                 str(audio_template),
-                ops={"title": overwrite("title", "Modified Title")},
+                ops={"title": write("title", "Modified Title")},
                 targeted_fields=["title"],
                 dry_run=True
             )
@@ -190,7 +190,7 @@ class TestProcessFile:
 
         result = process_file(
             str(audio_template),
-            ops={"title": overwrite("title", "Same Title")},
+            ops={"title": write("title", "Same Title")},
             targeted_fields=["title"],
             dry_run=False
         )
@@ -198,6 +198,61 @@ class TestProcessFile:
         assert result['passed'] is True
         assert result['note'] == 'no changes'
         assert result['wrote'] is False
+        
+    def test_process_create_new_field(self, audio_template):
+        """Test creating a new field that didn't exist."""
+        # Ensure field doesn't exist field
+        with SimpleMusic.managed(audio_template) as sm:
+            # We use a standard field that might be empty, e.g. composer
+            sm.write_fields({"composer": []})
+            
+        result = process_file(
+            str(audio_template),
+            ops={"composer": write("composer", "New Composer")},
+            targeted_fields=["composer"]
+        )
+        
+        assert result['passed'] is True
+        assert result['wrote'] is True
+        
+        with SimpleMusic.managed(audio_template) as sm:
+             fields = sm.read_fields()
+             assert fields['composer'] == ["New Composer"]
+
+    def test_process_create_new_custom_field(self, audio_template):
+        """Test creating a new custom field (TXXX/Vorbis/etc)."""
+        # This depends on format support in SimpleMusic/mutagen
+        # We'll try to write a custom tag and read it back with extended schema
+        
+        custom_field = "MyNewTag"
+        custom_value = "MyValue"
+        
+        result = process_file(
+            str(audio_template),
+            ops={custom_field: write(custom_field, custom_value)},
+            targeted_fields=[custom_field],
+            read_schema="extended" # Read extended to see custom tags
+        )
+        
+        assert result['passed'] is True
+        
+        with SimpleMusic.managed(audio_template) as sm:
+             fields = sm.read_fields(schema="extended")
+             # Key might be normalized or prefixed depending on format impl
+             # check values
+             all_values = [v for vals in fields.values() for v in vals if isinstance(vals, list)]
+             if not all_values: # maybe values are not lists of strings?
+                 all_values = list(fields.values())
+                 
+             # We just check if value is present somewhere, 
+             # precise key matching is tricky across formats without exact logic knowledge
+             found = False
+             for k, v in fields.items():
+                 if custom_value in v:
+                     found = True
+                     break
+             
+             assert found, f"Custom value {custom_value} not found in fields: {fields}"
         
     def test_process_file_with_schema(self, audio_template):
         """Test processing with explicit read_schema."""
@@ -250,7 +305,8 @@ class TestProcessFile:
         # SimpleMusic.read_fields(extended) tries to reverse map.
         found_keys = list(result_extended['original'].keys())
         # It might be normalized or kept as is.
-        assert any(k.lower() == "x-custom-tag" for k in found_keys) or "TXXX:X-Custom-Tag" in found_keys
+        # Sanitization uppercases on write, but lowercases + sanitizes on read
+        assert any(k == "x_custom_tag" for k in found_keys) or "TXXX:X_CUSTOM_TAG" in found_keys
 
     def test_process_file_with_backup(self, audio_template, tmp_path):
         """Test successful processing with backup creation."""
@@ -263,7 +319,7 @@ class TestProcessFile:
         # Use force=True to prevent backup cleanup
         result = process_file(
             str(audio_template),
-            ops={"title": overwrite("title", "New Title")},
+            ops={"title": write("title", "New Title")},
             targeted_fields=["title"],
             dry_run=False,
             backup_dir=str(backup_dir),
@@ -299,7 +355,7 @@ class TestProcessFile:
 
         result = process_file(
             str(invalid_file),
-            ops={"title": overwrite("title", "New Title")},
+            ops={"title": write("title", "New Title")},
             targeted_fields=["title"]
         )
 
@@ -314,7 +370,7 @@ class TestProcessFile:
         
         result = process_file(
             str(corrupt_file),
-            ops={"title": overwrite("title", "New Title")},
+            ops={"title": write("title", "New Title")},
             targeted_fields=["title"]
         )
         
@@ -328,7 +384,7 @@ class TestProcessFile:
         # 1. Set Title
         res1 = process_file(
             str(audio_template),
-            ops={"title": overwrite("title", "First Title")},
+            ops={"title": write("title", "First Title")},
             targeted_fields=["title"]
         )
         assert res1['passed'] is True
@@ -336,7 +392,7 @@ class TestProcessFile:
         # 2. Set Artist (verify Title remains)
         res2 = process_file(
             str(audio_template),
-            ops={"artist": overwrite("artist", "Second Artist")},
+            ops={"artist": write("artist", "Second Artist")},
             targeted_fields=["artist"]
         )
         assert res2['passed'] is True
@@ -351,7 +407,7 @@ class TestProcessFile:
         # 1. Initial change
         res1 = process_file(
             str(audio_template),
-            ops={"album": overwrite("album", "Test Album")},
+            ops={"album": write("album", "Test Album")},
             targeted_fields=["album"]
         )
         assert res1['passed'] is True
@@ -360,7 +416,7 @@ class TestProcessFile:
         # 2. Apply SAME change
         res2 = process_file(
             str(audio_template),
-            ops={"album": overwrite("album", "Test Album")},
+            ops={"album": write("album", "Test Album")},
             targeted_fields=["album"]
         )
         assert res2['passed'] is True
@@ -373,7 +429,7 @@ class TestProcessFile:
         test_val = "Music 🎵 音楽 Μουσική Музыка"
         result = process_file(
             str(audio_template),
-            ops={"title": overwrite("title", test_val)},
+            ops={"title": write("title", test_val)},
             targeted_fields=["title"]
         )
         assert result['passed'] is True
@@ -388,7 +444,7 @@ class TestProcessFile:
         # Mutagen often keeps empty frames or drops them. core.py treats them as valid values.
         result = process_file(
             str(audio_template),
-            ops={"comment": overwrite("comment", "")},
+            ops={"comment": write("comment", "")},
             targeted_fields=["comment"]
         )
         assert result['passed'] is True
@@ -409,7 +465,7 @@ class TestProcessFile:
         large_val = "x" * 102400 
         result = process_file(
             str(audio_template),
-            ops={"comment": overwrite("comment", large_val)},
+            ops={"comment": write("comment", large_val)},
             targeted_fields=["comment"],
             verify=False  # Verification might fail if format truncates, but we want to check integrity
         )
@@ -432,7 +488,7 @@ class TestProcessFile:
         bad_val = "Start\x00End"
         result = process_file(
             str(audio_template),
-            ops={"title": overwrite("title", bad_val)},
+            ops={"title": write("title", bad_val)},
             targeted_fields=["title"],
             verify=False # Verification will likely fail due to stripping
         )
@@ -564,7 +620,7 @@ class TestParallelProcessing:
         with patch('mudio.processor._process_files_parallel') as mock_parallel:
             results = process_files(
                 files,
-                ops={"title": overwrite("title", "New Title")},
+                ops={"title": write("title", "New Title")},
                 targeted_fields=["title"],
                 use_parallel=True
             )
@@ -589,7 +645,7 @@ class TestParallelProcessing:
 
             process_files(
                 files,
-                ops={"title": overwrite("title", "New Title")},
+                ops={"title": write("title", "New Title")},
                 targeted_fields=["title"],
                 use_parallel=True,
                 verbose=False
@@ -611,7 +667,7 @@ class TestParallelProcessing:
 
         results = _process_files_parallel(
             files,
-            ops={"title": overwrite("title", "New Title")},
+            ops={"title": write("title", "New Title")},
             targeted_fields=["title"],
             max_workers=2,  # Force 2 workers
             verbose=False
@@ -634,7 +690,7 @@ class TestParallelProcessing:
         with patch('mudio.processor._process_files_parallel') as mock_parallel:
             results = process_files(
                 files,
-                ops={"title": overwrite("title", "New Title")},
+                ops={"title": write("title", "New Title")},
                 targeted_fields=["title"],
                 use_parallel=False
             )

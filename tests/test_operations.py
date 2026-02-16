@@ -2,7 +2,7 @@
 import pytest
 from mudio.operations import (
     FieldOperations,
-    overwrite,
+    write,
     append,
     prefix,
     prefix,
@@ -43,13 +43,13 @@ class TestFieldOperations:
 class TestOperations:
     """Tests for operation functions."""
 
-    def test_op_overwrite(self):
-        op = overwrite('title', 'New')
+    def test_op_write(self):
+        op = write('title', 'New')
         assert op(['Old']) == ['New']
         assert op([]) == ['New']
         
         # Test overwrite with empty value -> clear
-        op_empty = overwrite('title', '')
+        op_empty = write('title', '')
         assert op_empty(['Old']) == []
 
     def test_op_append(self):

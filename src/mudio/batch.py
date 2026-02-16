@@ -54,15 +54,15 @@ def process_batch(
     Examples:
         Basic usage - set all titles in a directory:
         >>> from mudio.batch import process_batch
-        >>> from mudio.operations import overwrite
-        >>> ops = {'title': overwrite('title', 'New Title')}
+        >>> from mudio.operations import write
+        >>> ops = {'title': write('title', 'New Title')}
         >>> result = process_batch('/music', ops, ['title'])
         >>> print(f"Processed {result['successful']} files")
         
         Set multiple fields with backup:
         >>> ops = {
-        ...     'artist': overwrite('artist', 'Artist Name'),
-        ...     'album': overwrite('album', 'Album Name')
+        ...     'artist': write('artist', 'Artist Name'),
+        ...     'album': write('album', 'Album Name')
         ... }
         >>> result = process_batch(
         ...     '/music', 
@@ -171,7 +171,7 @@ def set_fields(
         ... )
         >>> print(f"Would modify {result['processed']} files")
     """
-    from .operations import overwrite
+    from .operations import write
     
     operations = {}
     field_list = []
@@ -180,7 +180,7 @@ def set_fields(
         if field_name not in CANONICAL_FIELDS:
             raise ValueError(f"Invalid field: {field_name}")
         
-        operations[field_name] = overwrite(field_name, value)
+        operations[field_name] = write(field_name, value)
         field_list.append(field_name)
     
     return process_batch(path, operations, field_list, **kwargs)
