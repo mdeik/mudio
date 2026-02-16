@@ -501,10 +501,10 @@ def print_metadata(metadata: FieldValuesType, max_len: int = 150, raw_fields: bo
         printed_keys.add(field_name)
             
     # Print any remaining (custom/extended) fields
-    for key in sorted(metadata.keys()):
+    for key in metadata.keys():
         if key not in printed_keys:
-            # Simple title case for display key if it looks like a key
-            display_key = key.title() if key.islower() else key
+            # Display key as is (no title casing, no sorting)
+            display_key = key
             values = metadata[key]
             print(f"    {display_key}: {format_val(values)}")
 

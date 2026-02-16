@@ -126,6 +126,18 @@ export MUDIO_SCHEMA=extended
 python your_script.py
 ```
 
+## Behavior Notes
+
+### MP3 Comment and Performer Handling
+To ensure metadata consistency, `mudio` applies specific logic when reading and writing MP3 comments (`COMM`) and Performer tags (`TPE3` / `TXXX:PERFORMER`):
+-   **Reading**:
+    -   **Identical Frames**: If multiple frames satisfy the same description/type and have *identical content* (case-sensitive), they are deduplicated (e.g. `['a']` + `['a']` -> `['a']`).
+    -   **Intra-Frame Duplicates**: Duplicates *within* a single frame are preserved (e.g. `['a', 'b', 'b']` -> `['a', 'b', 'b']`).
+    -   **Distinct Frames**: Different frames are preserved (e.g. `['a']` + `['b']` -> `['a', 'b']`).
+-   **Writing**:
+    -   **Comments**: All comment values are **collapsed** into a single `COMM` frame.
+    -   **Performers**: All performer values are written to standard `TPE3` frames (and `TXXX:PERFORMER` if needed), ensuring no duplication between standard and custom tag fields.
+
 ## Comparison with Alternatives
 
 ### vs. **Mutagen**

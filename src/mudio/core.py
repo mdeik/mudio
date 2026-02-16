@@ -168,6 +168,30 @@ class SimpleMusic:
         except (ValueError, TypeError):
             return None
     
+    @staticmethod
+    def _deduplicate_frames(frames_values: List[List[str]]) -> List[str]:
+        """
+        Deduplicate frame values.
+        If two frames have EXACTLY the same list of values, keep only one.
+        Otherwise keep both, maintaining order.
+        
+        Args:
+            frames_values: List of lists, where each inner list is the content of a frame.
+            
+        Returns:
+            Flattened list of values with frame-level duplicates removed.
+        """
+        seen = []
+        out = []
+        for val_list in frames_values:
+            # Check if we've seen this exact sequence of values before (case-sensitive)
+            key = tuple(str(s) for s in val_list)
+            
+            if key not in seen:
+                seen.append(key)
+                out.extend(val_list)
+        return out
+    
     
     def read_fields(self, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """
@@ -177,7 +201,7 @@ class SimpleMusic:
             schema: 'canonical' - return only standardized fields.
                   'raw' - return all fields with native keys.
                   'extended' - return canonical fields plus any other fields found.
-                  None (default) - use Config.DEFAULT_SCHEMA.
+                  None (default) - use Config.DEFAULT_MODE.
         """
         if schema is None:
             # New config class might not be imported yet if circular import risk,
@@ -206,9 +230,21 @@ class SimpleMusic:
     def _read_mp4_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
         """Read fields from MP4/M4A files."""
         if schema == 'raw':
-            # Just dump what we have
-            return {str(k): [str(v) for v in vals] if isinstance(vals, list) else [str(vals)] 
-                    for k, vals in tags.items()}
+            # Just dump what we have, but decode bytes if possible
+            out = {}
+            for k, vals in tags.items():
+                val_list = vals if isinstance(vals, list) else [vals]
+                out_vals = []
+                for v in val_list:
+                    if isinstance(v, bytes):
+                        try:
+                            out_vals.append(v.decode('utf-8', errors='replace'))
+                        except Exception:
+                            out_vals.append(str(v))
+                    else:
+                        out_vals.append(str(v))
+                out[str(k)] = out_vals
+            return out
 
         out = {k: [] for k in CANONICAL_FIELDS}
         
@@ -238,12 +274,18 @@ class SimpleMusic:
         out['composer'] = get_vals('\xa9wrt')
         
         # Performer handling for MP4
-        perf_vals = []
-        perf_vals.extend(get_vals('perf'))
+        perf_vals_list = []
+        
+        # 'perf' atom
+        if 'perf' in tags:
+            perf_vals_list.append(get_vals('perf'))
+            
         # Try different performer tag variations
         for perf_key in ['\xa9prf', 'Â©prf', '----:com.apple.iTunes:PERFORMER']:
-            perf_vals.extend(get_vals(perf_key))
-        out['performer'] = [s for s in perf_vals if s != ""]
+             if perf_key in tags:
+                perf_vals_list.append(get_vals(perf_key))
+                
+        out['performer'] = self._deduplicate_frames(perf_vals_list)
         
         # Track/disk tuples
         trkn = tags.get('trkn')
@@ -252,23 +294,53 @@ class SimpleMusic:
                 tnum, ttot = trkn[0]
                 if tnum is not None: 
                     out['track'] = [str(tnum)]
-                if ttot is not None: 
+                if ttot is not None and ttot != 0: 
                     out['totaltracks'] = [str(ttot)]
             except Exception as e:
                 logger.debug(f"Failed to parse MP4 track number: {e}")
                 pass
         
+        # Fallback: check for custom track/totaltracks fields if standard atom missed
+        if not out['track']:
+            for k in ['----:com.apple.iTunes:track', '----:com.apple.iTunes:TRACK']:
+                val = get_vals(k)
+                if val:
+                    out['track'] = val
+                    break
+        
+        if not out['totaltracks']:
+            for k in ['----:com.apple.iTunes:totaltracks', '----:com.apple.iTunes:TOTALTRACKS']:
+                val = get_vals(k)
+                if val:
+                    out['totaltracks'] = val
+                    break
+
         disk = tags.get('disk')
         if disk and isinstance(disk, list) and len(disk) > 0:
             try:
                 dnum, dtot = disk[0]
                 if dnum is not None: 
                     out['disc'] = [str(dnum)]
-                if dtot is not None: 
+                if dtot is not None and dtot != 0:
                     out['totaldiscs'] = [str(dtot)]
             except Exception as e:
                 logger.debug(f"Failed to parse MP4 disc number: {e}")
                 pass
+
+        # Fallback: check for custom disc/totaldiscs fields if standard atom missed
+        if not out['disc']:
+            for k in ['----:com.apple.iTunes:disc', '----:com.apple.iTunes:DISC']:
+                val = get_vals(k)
+                if val:
+                    out['disc'] = val
+                    break
+        
+        if not out['totaldiscs']:
+             for k in ['----:com.apple.iTunes:totaldiscs', '----:com.apple.iTunes:TOTALDISCS']:
+                val = get_vals(k)
+                if val:
+                    out['totaldiscs'] = val
+                    break
                 
         if schema == 'extended':
             # Add other atoms
@@ -338,28 +410,48 @@ class SimpleMusic:
         # Comments
         comms = tags.getall('COMM')
         if comms:
-            out['comment'] = []
+            comm_frames = []
+            comm_frames = []
             for c in comms:
                 if hasattr(c, 'text'):
-                    out['comment'].extend([str(x) for x in c.text])
+                    comm_frames.append([str(x) for x in c.text])
+            out['comment'] = self._deduplicate_frames(comm_frames)
         
         out['composer'] = get_frame('TCOM')
         
         # Performer: include TPE3 and TXXX:PERFORMER
-        out['performer'] = get_frame('TPE3')
+        perf_frames = []
+        tpe3 = get_frame('TPE3')
+        if tpe3:
+            perf_frames.append(tpe3)
+            
         txxx_frames = tags.getall('TXXX')
         for tx in txxx_frames:
             try:
                 desc = (getattr(tx, 'desc', '') or '').strip().lower()
                 if desc in ('performer', 'performers', 'perf'):
-                    out['performer'].extend([str(x) for x in getattr(tx, 'text', [])])
+                    if hasattr(tx, 'text'):
+                        perf_frames.append([str(x) for x in getattr(tx, 'text', [])])
                 
                 # Extended schema: add TXXX frames that aren't performer
                 if schema == 'extended' and desc not in ('performer', 'performers', 'perf'):
-                     out[desc] = [str(x) for x in getattr(tx, 'text', [])]
+                     # Note: We aren't deduping extended TXXX here easily because we iterate them.
+                     # But duplication of TXXX with same desc is rare/handled by list append usually.
+                     # For now, just append.
+                     if hasattr(tx, 'text'):
+                        vals = [str(x) for x in getattr(tx, 'text', [])]
+                        if desc in out:
+                            out[desc].extend(vals)
+                        else:
+                            out[desc] = vals
             except Exception as e:
                 logger.debug(f"Failed to parse ID3 TXXX frame: {e}")
                 continue
+        
+        if perf_frames:
+            out['performer'] = self._deduplicate_frames(perf_frames)
+        
+        out['date'] = get_frame('TDRC') or get_frame('TORY') or get_frame('TDAT')
         
         out['date'] = get_frame('TDRC') or get_frame('TORY') or get_frame('TDAT')
         
@@ -650,11 +742,19 @@ class SimpleMusic:
         }
         
         for key, vals in fields.items():
-            if key not in known_fields and vals:
+            if key not in known_fields:
                 atom_key = key
                 if not key.startswith('----:') and not key.startswith('©') and not key.startswith('covr'):
                      atom_key = f"----:com.apple.iTunes:{key.upper()}"
                 
+                if not vals:
+                    # Handle deletion for custom fields
+                    try:
+                        del tags[atom_key]
+                    except KeyError:
+                        pass
+                    continue
+
                 if atom_key.startswith('----:'):
                     tags[atom_key] = [str(v).encode('utf-8') for v in vals]
                 else:
@@ -712,8 +812,8 @@ class SimpleMusic:
         if fields.get('genre'):
             tags.add(id3.TCON(encoding=3, text=fields['genre']))
         if fields.get('comment'):
-            for c in fields['comment']:
-                tags.add(id3.COMM(encoding=3, lang='eng', desc='', text=[str(c)]))
+            # Collapse multiple comments into a single frame as requested
+            tags.add(id3.COMM(encoding=3, lang='eng', desc='', text=fields['comment']))
         if fields.get('composer'):
             tags.add(id3.TCOM(encoding=3, text=fields['composer']))
         
