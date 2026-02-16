@@ -53,8 +53,7 @@ def unregister_signal_handlers():
 # ---------- Parallel Processing ----------
 def _process_files_parallel(
     files: Iterable[Path],
-    ops: FieldOperationsType,
-    targeted_fields: List[str],
+    ops: List[FieldOperationsType],
     *,
     max_workers: int = None,
     filters: Optional[List[FilterType]] = None,
@@ -72,7 +71,6 @@ def _process_files_parallel(
     Args:
         files: Iterable of file paths to process
         ops: Operations to apply to fields
-        targeted_fields: Fields to modify
         max_workers: Number of parallel threads (None = auto)
         filters: List of (field, pattern, is_regex) tuples to filter files
         dry_run: If True, show changes without writing
@@ -104,7 +102,6 @@ def _process_files_parallel(
                 process_file,
                 str(file_path),
                 ops,
-                targeted_fields,
                 filters=filters,
                 dry_run=dry_run,
                 backup_dir=backup_dir,
@@ -149,11 +146,9 @@ def _process_files_parallel(
 
 def process_files(
     files: Iterable[Path],
-    ops: FieldOperationsType,
-    targeted_fields: List[str],
+    ops: List[FieldOperationsType],
     *,
     max_workers: int = 0,
-    use_parallel: bool = True,
     filters: Optional[List[FilterType]] = None,
     dry_run: bool = False,
     backup_dir: Optional[str] = None,
@@ -176,7 +171,6 @@ def process_files(
     effective_workers = max_workers if max_workers > 0 else Config.MAX_WORKERS
     
     should_use_parallel = (
-        use_parallel and 
         total_files >= Config.MIN_FILES_FOR_PARALLEL and
         effective_workers != 1
     )
@@ -188,7 +182,7 @@ def process_files(
                 print(f"Processing {total_files} files in parallel...")
         
         return _process_files_parallel(
-            files_list, ops, targeted_fields,
+            files_list, ops,
             max_workers=effective_workers, 
             filters=filters,
             dry_run=dry_run,
@@ -212,15 +206,12 @@ def process_files(
                 print(progress_msg, end='\r' if i < total_files else '\n')
             
             result = process_file(
-                str(file_path), ops, targeted_fields,
-                max_workers=effective_workers,
-                use_parallel=False,
+                str(file_path), ops,
                 filters=filters,
                 dry_run=dry_run,
                 backup_dir=backup_dir,
                 delete_backups=delete_backups,
                 force=force,
-                verbose=verbose,
                 verify=verify,
                 read_schema=read_schema
             )
@@ -435,17 +426,13 @@ def _cleanup_backup(backup_path: Optional[Path], force: bool, delete_backups: bo
 
 # ---------- Process One File ----------
 def process_file(path: str, 
-                ops: FieldOperationsType, 
-                targeted_fields: List[str], 
+                ops: List[FieldOperationsType], 
                 *,
-                max_workers: Optional[int] = None,
-                use_parallel: bool = False,
                 filters: Optional[List[FilterType]] = None,
                 dry_run: bool = False, 
                 backup_dir: Optional[str] = None, 
                 delete_backups: bool = False,
                 force: bool = False,
-                verbose: bool = False,
                 verify: bool = True,
                 read_schema: Optional[str] = None) -> ProcessResultType:
     """Process a single file with comprehensive error handling."""
@@ -481,30 +468,13 @@ def process_file(path: str,
             # Step 3: Compute new fields
             # Match targeted fields to existing fields case-insensitively where possible
             # This handles formats like FLAC that normalize keys to lowercase
-            effective_ops = {}
-            effective_targeted_fields = []
             
-            orig_keys_lower = {k.lower(): k for k in orig.keys()}
+            # Compute new fields (field resolution is now handled inside compute_new_fields)
+            new_fields, changed = compute_new_fields(orig, ops)
             
-            for field in targeted_fields:
-                # 1. Exact match
-                if field in orig:
-                    effective_targeted_fields.append(field)
-                    if field in ops:
-                        effective_ops[field] = ops[field]
-                # 2. Case-insensitive match to existing field
-                elif field.lower() in orig_keys_lower:
-                    actual_key = orig_keys_lower[field.lower()]
-                    effective_targeted_fields.append(actual_key)
-                    if field in ops:
-                        effective_ops[actual_key] = ops[field]
-                # 3. New / Non-existent field (keep original casing)
-                else:
-                    effective_targeted_fields.append(field)
-                    if field in ops:
-                        effective_ops[field] = ops[field]
-
-            new_fields, changed = compute_new_fields(orig, effective_ops, effective_targeted_fields)
+            # Effective targeted fields are those that were touched by operations
+            effective_targeted_fields = list(changed.keys())
+            
             any_changed = any(changed.values())
             
             record = {
@@ -516,7 +486,9 @@ def process_file(path: str,
                 'wrote': False,
                 'verified': {},
                 'error': None,
-                'exception': None
+                'exception': None,
+                'backup_path': None,
+                'backup_kept': None
             }
             
             if not any_changed:
@@ -531,6 +503,7 @@ def process_file(path: str,
                 backup_path, backup_error = _create_backup(file_path, Path(backup_dir))
                 if backup_error:
                     return {**record, 'error': backup_error, 'passed': False}
+                record['backup_path'] = str(backup_path)
             else:
                 backup_path = None
             
@@ -569,10 +542,13 @@ def process_file(path: str,
             # Step 7: Cleanup backup
             if record['passed']:
                  _cleanup_backup(backup_path, force, delete_backups)
+                 if backup_path:
+                     record['backup_kept'] = not delete_backups
             else:
                  # If failed, ALWAYS keep backup
                  if backup_path and backup_path.exists():
                      logger.debug(f"Keeping backup due to failure: {backup_path}")
+                     record['backup_kept'] = True
             
             return record
 

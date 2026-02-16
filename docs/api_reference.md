@@ -6,63 +6,60 @@ This document provides a detailed reference for the internal Python API of `mudi
 
 ## Recommended: Use `mudio.processor`
 
-**For most use cases, you should use the high-level `process_file()` and `process_files()` functions.** These provide:
-
-- ✅ **Automatic backups** and rollback on failure
-- ✅ **Verification** to ensure changes were written correctly
-- ✅ **Filtering** to target specific files
-- ✅ **Parallel processing** for large batches
-- ✅ **Comprehensive error handling** and reporting
+**For most use cases, use the high-level `process_file()` and `process_files()` functions.** They provide automatic backups, verification, filtering, parallel processing, and comprehensive error handling.
 
 ### Quick Example
 
 ```python
 from mudio.processor import process_file
-from mudio.operations import find_replace, enlist
+from mudio.operations import write, append, delete
 
-# Apply operations with automatic backups and verification
 result = process_file(
     "song.mp3",
-    ops={
-        'title': find_replace('title', 'Demo', 'Final'),
-        'genre': enlist('genre', 'Rock')
-    },
-    targeted_fields=['title', 'genre'],
-    backup_dir='./backups',
-    verify=True
+    ops=[
+        write('artist', 'The Beatles'),
+        write('album', 'Abbey Road'),
+        append('genre', 'Rock'),          # Add to existing genres
+        delete('comment')                  # Remove field entirely
+    ],
+    backup_dir='./backups'
 )
 
-# result is a dictionary with detailed information
 if result['passed']:
-    print(f"✓ Success: {result['changed']}")
+    print(f"✓ Updated {list(result['changed'].keys())}")
 else:
-    print(f"✗ Failed: {result['error']}")
+    print(f"✗ {result['error']}")
 ```
 
 ---
 
-## Processor (`mudio.processor`)
+## Processing Functions
 
-The processor module handles high-level batch processing, including parallel execution, file validation, backups, and error reporting.
+Mudio provides a layered API with multiple entry points depending on your use case:
 
-### `process_file()`
+1. **`process_file`** - Process a single file with full control
+2. **`process_files`** - Process multiple files (takes a list of Paths)
+3. **`process_batch`** - High-level batch API with directory scanning and result summarization
+4. **`write_fields`** - Convenient shorthand for writing multiple fields at once
 
-**`process_file(path: str, ops: FieldOperationsType, targeted_fields: List[str], ...) -> ProcessResultType`**
+---
 
-Processes a single file with comprehensive error handling.
+### `process_file()` - Single File Processing
+
+**`process_file(path: str, ops: List[FieldOperationsType], ...) -> ProcessResultType`**
+
+Processes a single audio file with comprehensive error handling, backup, and verification.
 
 **Parameters:**
 - **path** (str): File path to process
-- **ops** (Dict): Dictionary mapping field names to operation functions (see `mudio.operations`)
-- **targeted_fields** (List[str]): Fields being modified (used for verification)
-- **backup_dir** (str, optional): Path to directory for storing backups
-- **dry_run** (bool): If `True`, calculates changes but does not write to disk
-- **verify** (bool): If `True`, re-reads file after writing to verify changes
-- **filters** (List[FilterType], optional): Filters to apply before processing
-- **verbose** (bool): Enables progress printing
-- **force** (bool): If `True`, overwrites existing backups where necessary
-- **delete_backups** (bool): If `True`, removes backups after successful operations
-- **read_schema** (str, optional): Schema to use when reading metadata ('canonical', 'extended', 'raw'). Default: `None` (uses global default).
+- **ops** (List[FieldOperationsType]): List of operation functions to apply (see `mudio.operations`)
+- **filters** (List[FilterType], optional): Filter conditions to check before processing
+- **dry_run** (bool): If `True`, calculates changes but does not write to disk. Default: `False`
+- **backup_dir** (str, optional): Directory to store backups before modification
+- **delete_backups** (bool): If `True`, deletes backups after successful operations. Default: `False`
+- **force** (bool): If `True`, overwrites existing backups. Default: `False`
+- **verify** (bool): If `True`, re-reads file after writing to verify changes. Default: `True`
+- **read_schema** (str, optional): Schema for reading metadata (`'canonical'`, `'extended'`, `'raw'`). Default: `None` (uses global config)
 
 **Returns:** `ProcessResultType` (Dict) with keys:
 - `'passed'` (bool): Whether processing succeeded
@@ -77,57 +74,152 @@ Processes a single file with comprehensive error handling.
 - `'skipped'` (bool): If file was skipped (e.g., filter didn't match)
 - `'note'` (str): Additional notes (e.g., 'no changes', 'dry-run')
 
-**Processing Steps:**
-1. Validates file (permissions, format, size)
-2. Applies filters to determine if file matches criteria
-3. Computes new tag values using `ops`
-4. Creates backup (if `backup_dir` specified)
-5. Writes changes to file
-6. Verifies changes by re-reading (if `verify=True`)
-7. Cleans up or preserves backup based on success
+**Example:**
+```python
+from mudio.processor import process_file
+from mudio.operations import write, prefix
 
-### `process_files()`
+# Process with dry-run to preview changes
+result = process_file(
+    "song.mp3",
+    ops=[
+        write('album', 'Greatest Hits'),
+        prefix('title', '[Remastered] ')
+    ],
+    dry_run=True
+)
 
-**`process_files(files: Iterable[Path], ops: FieldOperationsType, targeted_fields: List[str], ...) -> List[ProcessResultType]`**
+if result['passed']:
+    print(f"Planned: {result['planned']}")
+    print(f"Would change: {list(result['changed'].keys())}")
+```
 
-Batch processes multiple files. Automatically chooses between sequential and parallel processing based on file count and configuration.
+---
+
+### `process_files()` - Batch File Processing
+
+**`process_files(files: Iterable[Path], ops: List[FieldOperationsType], ...) -> List[ProcessResultType]`**
+
+Processes multiple files. Automatically chooses between sequential and parallel processing based on file count and configuration.
 
 **Parameters:** Same as `process_file()`, plus:
 - **files** (Iterable[Path]): Iterable of file paths to process
-- **max_workers** (int): Number of threads. Default `0` means auto-detect. Set to `1` for sequential processing
-- **use_parallel** (bool): If `False`, forces sequential processing even for large batches
+- **max_workers** (int): Number of parallel threads. Default `0` = auto-detect. Set to `1` for sequential processing
 
 **Returns:** List of `ProcessResultType` dictionaries, one per file
 
 **Example:**
 ```python
 from mudio.processor import process_files
-from mudio.operations import write
+from mudio.operations import write, enlist
 from pathlib import Path
 
-files = Path('/music').glob('*.mp3')
+# Process files with filtering (only files with specific artist)
 results = process_files(
-    files,
-    ops={'album': write('album', 'Greatest Hits')},
-    targeted_fields=['album'],
-    max_workers=4,
+    Path('music').glob('*.flac'),
+    ops=[enlist('genre', 'Electronic;Ambient')],
+    filters=[('artist', 'Brian Eno', False)],  # Plain text match
+    max_workers=4
+)
+
+print(f"Updated {sum(r['passed'] for r in results)} files")
+```
+
+---
+
+### `process_batch()` - High-Level Batch API
+
+**`process_batch(path: Union[str, Path], operations: List[FieldOperationsType], ...) -> Dict[str, Any]`**
+
+High-level API that combines file collection with batch processing. Automatically scans directories and provides a summary of results.
+
+**Parameters:**
+- **path** (Union[str, Path]): Directory or file path to process
+- **operations** (List[FieldOperationsType]): List of operation functions to apply
+- **recursive** (bool): If `True`, search subdirectories. Default: `False`
+- **extensions** (List[str], optional): File extensions to include (e.g., `['.mp3', '.flac']`). Default: all supported formats
+- **filters** (List[FilterType], optional): Filter conditions
+- **dry_run** (bool): If `True`, show changes without writing. Default: `False`
+- **backup_dir** (Union[str, Path], optional): Directory for backups
+- **force** (bool): If `True`, allow potentially destructive operations. Default: `False`
+- **verbose** (bool): If `True`, show detailed progress. Default: `False`
+- **max_workers** (Optional[int]): Number of parallel workers. Default: `None` (auto-detect)
+- **verify** (bool): If `True`, verify writes by reading back. Default: `True`
+
+**Returns:** Dict with keys:
+- `'processed'` (int): Total files processed
+- `'successful'` (int): Files processed successfully
+- `'failed'` (int): Files that failed
+- `'skipped'` (int): Files skipped by filters
+- `'results'` (List[ProcessResultType]): Detailed results for each file
+
+**Example:**
+```python
+from mudio.batch import process_batch
+from mudio.operations import find_replace
+
+# Batch replace text in all files under a directory
+result = process_batch(
+    'music/albums',
+    operations=[find_replace('title', r'\s*\(feat\..*?\)', '', regex=True)],
+    recursive=True,
+    extensions=['.mp3', '.m4a'],
     backup_dir='./backups'
 )
 
-# Analyze results
-success = sum(1 for r in results if r['passed'])
-print(f"Processed {success}/{len(results)} files successfully")
+print(f"{result['successful']}/{result['processed']} files updated")
+for r in result['results']:
+    if r.get('error'):
+        print(f"Failed: {r['path']} - {r['error']}")
 ```
+
+---
+
+### `write_fields()` - Convenience Function
+
+**`write_fields(path: Union[str, Path], fields: Dict[str, Union[str, List[str]]], **kwargs) -> Dict[str, Any]`**
+
+Convenience function to set multiple fields at once. Automatically converts field dictionary into write operations and calls `process_batch()`.
+
+**Parameters:**
+- **path** (Union[str, Path]): Directory or file path to process
+- **fields** (Dict[str, Union[str, List[str]]]): Dictionary mapping field names to values
+- **kwargs**: Additional arguments passed to `process_batch()` (e.g., `recursive`, `dry_run`, `backup_dir`)
+
+**Returns:** Same as `process_batch()`
+
+**Example:**
+```python
+from mudio.batch import write_fields
+
+# Convenience function for setting canonical fields only
+result = write_fields(
+    'music/album',
+    fields={
+        'artist': 'The Beatles',
+        'album': 'Abbey Road',
+        'date': '1969'
+    },
+    recursive=True
+)
+
+print(f"Updated {result['successful']} files")
+```
+
+> [!NOTE]
+> `write_fields()` only accepts canonical field names. For custom fields, use `process_batch()` with `write()` operations directly.
+
+---
 
 ### Validation
 
-**`validate_file(path: Path) -> None`**
+**`validate_file(path: Path) -> Tuple[bool, str]`**
 
-Performs comprehensive file validation. Raises exceptions on failure:
+Performs comprehensive file validation. Returns `(success: bool, message: str)` tuple:
 - File existence and type
 - Read/write permissions
 - File size (empty files or files exceeding limits)
-- Format validity (can mutagen parse it?)
+- Format validity (supported extension check)
 
 ---
 
@@ -151,42 +243,29 @@ result = op(['Demo Track'])  # Returns ['Final Track']
 
 ### Operation Functions
 
-All operations return `Callable[[List[str]], List[str]]` - a function that transforms field values.
+All operations return a transformation function: `Callable[[List[str]], List[str]]`
 
-*   **`write(field, value, delimiter=';')`**: Creates or overwrites the field with the given value(s)
-    - Splits strings on `delimiter` for multi-valued fields
-    - Example: `write('album', 'Greatest Hits')` 
+| Operation | Purpose | Example |
+|-----------|---------|---------|
+| **`write(field, value, delimiter=';')`** | Create/overwrite field | `write('album', 'Greatest Hits')` |
+| **`append(field, value, delimiter=';')`** | Add to existing value | `append('title', ' (Remastered)')` |
+| **`prefix(field, value)`** | Prepend to value(s) | `prefix('artist', 'DJ ')` |
+| **`find_replace(field, find, replace, regex=False, delimiter=';')`** | String substitution | `find_replace('title', r'\\d+', '#', regex=True)` |
+| **`enlist(field, value, delimiter=';')`** | Add item(s) to multi-valued field | `enlist('genre', 'Rock;Electronic')` |
+| **`delist(field, value, delimiter=';')`** | Remove item(s) from multi-valued field | `delist('genre', 'Pop')` |
+| **`clear(field)`** | Set field to empty string | `clear('comment')` |
+| **`delete(field)`** | Remove field entirely | `delete('custom_field')` |
 
-*   **`append(field, value, delimiter=';')`**: Adds to existing values
-    - Single-valued fields: Appends string to existing value
-    - Multi-valued fields: Adds new item(s) if not present
-    - Example: `append('title', ' (Remastered)')`
+**Combining Operations:**
+```python
+from mudio.operations import write, enlist, find_replace
 
-*   **`prefix(field, value)`**: Prepends string to values
-    - Single-valued: Prepends to the first value
-    - Multi-valued: Prepends to all values
-    - Example: `prefix('artist', 'DJ ')`
-
-*   **`find_replace(field, find, replace, regex=False, delimiter=';')`**: String substitution
-    - Supports literal or regex patterns
-    - If result contains `delimiter`, splits into multiple values (for multi-valued fields)
-    - Example: `find_replace('title', r'\d+', '#', regex=True)`
-
-*   **`enlist(field, value, delimiter=';')`**: Adds value(s) to multi-valued field
-    - Only adds if not already present (case-insensitive)
-    - Example: `enlist('genre', 'Rock;Electronic')`
-
-*   **`delist(field, value, delimiter=';')`**: Removes specific value(s)
-    - Case-insensitive removal
-    - Example: `delist('artist', 'Old Artist')`
-
-*   **`clear(field)`**: Sets field to empty string
-    - Returns `[""]` - field remains present but empty
-    - Behavior varies by format (some may omit empty fields)
-
-*   **`delete(field)`**: Removes field key entirely
-    - Returns `[]` - field is removed from metadata
-    - More complete removal than `clear()`
+ops = [
+    write('album', 'Best Of Collection'),
+    enlist('genre', 'Rock;Classic'),        # Add genres if not present
+    find_replace('title', r'\\s+', ' ', regex=True)  # Normalize whitespace
+]
+```
 
 ### Field Types
 
@@ -202,17 +281,7 @@ The `FieldOperations` class categorizes fields:
 
 ## Low-Level: `SimpleMusic` (Advanced Users)
 
-> **⚠️ Most users should use `process_file()` instead.** Use `SimpleMusic` directly only if you need fine-grained control or custom logic that doesn't fit standard operations.
-
-`SimpleMusic` is the underlying class that provides direct read/write access to audio metadata. It's used internally by `mudio.processor`.
-
-### When to Use `SimpleMusic`
-
-Use `SimpleMusic` directly when:
-- You need custom logic that doesn't fit standard operations
-- You're building your own tools with different safety/backup requirements
-- You want maximum control over the read/write workflow
-- You don't need automatic backups, verification, or filtering
+> **⚠️ Most users should use `process_file()` instead.** Use `SimpleMusic` only if you need fine-grained control or custom logic beyond standard operations.
 
 ### Basic Usage
 
@@ -222,9 +291,9 @@ from mudio.core import SimpleMusic
 # Always use context manager for proper cleanup
 with SimpleMusic.managed("song.mp3") as sm:
     # Read metadata
-    fields = sm.read_fields()
+    fields = sm.read_fields(schema='extended')
     
-    # Your custom logic here
+    # Custom transformation
     if 'artist' in fields:
         fields['artist'] = [a.upper() for a in fields['artist']]
     
@@ -235,45 +304,41 @@ with SimpleMusic.managed("song.mp3") as sm:
 ### Methods
 
 **`SimpleMusic(path: Union[str, Path])`**
-- **path**: File path to open
-- **Raises**: `FormatError`, `RuntimeError`
 
-**`SimpleMusic.read_fields(schema: str = 'extended') -> Dict[str, List[str]]`**
+Opens an audio file for metadata access. Raises `FormatError` or `RuntimeError` on failure.
 
-Reads metadata from the file.
+**`read_fields(schema: str = 'extended') -> Dict[str, List[str]]`**
 
-- **schema**:
-  - `'canonical'`: Only standardized fields (title, artist, date, etc.)
-  - `'extended'` (default): Canonical fields **plus** any custom/extra fields
-  - `'raw'`: Same as extended but with format-specific keys (TIT2, ©nam, etc.)
+Reads metadata from the file. Returns a dict where keys are field names and values are **lists of strings** (even for single-valued fields).
 
-- **Returns**: Dictionary where keys are field names and values are **lists of strings**
-  - All values are lists for consistency, even single-valued fields
-  - See `FieldOperations` for which fields are semantically single vs. multi-valued
-  - **Key Sanitization**:
-    - **Read**: Keys are normalized to **small snake case** (`[a-z0-9_]`).
-    - **Write**: Custom keys are normalized to **caps snake case** (`[A-Z0-9_]`).
-    - **Normalization**: Drops alternative casing to prevent duplicates.
+**Schema Options:**
+- `'canonical'`: Only standard fields (title, artist, album, date, etc.)
+- `'extended'` (default): Canonical **plus** custom/extra fields with normalized keys
+- `'raw'`: Returns all fields with format-specific native keys (e.g., `TIT2`, `TXXX:FIELD` for MP3, `©nam` for M4A)
 
-**`SimpleMusic.write_fields(fields: Dict[str, List[str]])`**
+> [!NOTE]
+> **Raw mode** returns format-native keys unchanged, while **extended mode** returns normalized keys. For example:
+> - **Extended**: `my_custom_field`, `artist`, `title` (portable across formats)
+> - **Raw**: `TXXX:MY_CUSTOM_FIELD`, `TPE1`, `TIT2` (MP3-specific ID3 frames)
 
-Writes metadata to the file.
+**Key Normalization (Extended/Canonical modes only):**
+- **Canonical fields** always use standard lowercase names (`artist`, `album`, `title`, etc.)
+- **Custom field read keys** are sanitized to lowercase `[a-z0-9_]` (e.g., `My-Field!` → `my_field_`)
+- **Custom field write keys** are sanitized to uppercase `[A-Z0-9_]` for format-specific storage
+- Prevents duplicate fields with different casing
 
-- **fields**: Dictionary of field names to value lists
-  - Keys can be canonical names (`title`, `artist`) or custom strings
-  - Custom fields are written as format-specific tags (TXXX, freeform, etc.)
-  - Fields not in the dictionary are **preserved** (not deleted)
-  - To delete a field, pass `[]` as the value
+**`write_fields(fields: Dict[str, List[str]])`**
 
-- **Raises**: `PermissionError`, `RuntimeError`
+Writes metadata to the file. Custom fields are written as format-specific tags. Fields not in the dict are **preserved**. To delete a field, pass an empty list: `[]`.
 
-**`SimpleMusic.managed(path: Union[str, Path])`** (class method)
+**`SimpleMusic.managed(path)` (class method)**
 
-Context manager that ensures proper file cleanup.
+Returns a context manager for safe file handling.
 
-**`SimpleMusic.parse_list_string(s: Optional[str], delimiter: str = ';') -> List[str]`** (static)
+**`SimpleMusic.parse_list_string(s, delimiter=';')` (static)**
 
 Utility to split delimited strings into lists.
+
 
 ---
 
@@ -284,7 +349,6 @@ Utility to split delimited strings into lists.
 Global configuration settings loaded from environment variables:
 - `MUDIO_SCHEMA`: Default schema (`canonical`, `extended`, or `raw`). Default: `extended`
 - `MUDIO_MAX_WORKERS`: Default thread count for parallel processing
-- `MUDIO_BACKUP_DIR`: Default backup location
 - `MUDIO_VERBOSE`: Default verbosity (`0` or `1`)
 - `MUDIO_NAMESPACE`: Default namespace for MP4/M4A custom fields (default: `com.apple.iTunes`)
 
@@ -315,13 +379,8 @@ class VerificationError(MudioError): ...    # Post-write verification failed
 ### Type Definitions
 
 ```python
-FieldOperationsType = Dict[str, Callable[[List[str]], List[str]]]
-FieldValuesType = Dict[str, List[str]]
-FilterType = Tuple[str, str, bool]
-ProcessResultType = Dict[str, Any]
+FieldOperationsType = Callable[[List[str]], List[str]]  # Transformation function
+FieldValuesType = Dict[str, List[str]]                  # Metadata dictionary
+FilterType = Tuple[str, str, bool]                      # (field, pattern, is_regex)
+ProcessResultType = Dict[str, Any]                      # Result from process_file()
 ```
-
-*   **`FieldOperationsType`**: Maps field names to transformation functions
-*   **`FieldValuesType`**: Standard metadata dictionary (field → list of strings)
-*   **`FilterType`**: Tuple of (field, pattern, is_regex)
-*   **`ProcessResultType`**: Result dictionary from `process_file()`

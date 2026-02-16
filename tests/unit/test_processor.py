@@ -172,8 +172,7 @@ class TestProcessFile:
         with patch('mudio.processor.safe_file_copy') as mock_copy:
             result = process_file(
                 str(audio_template),
-                ops={"title": write("title", "Modified Title")},
-                targeted_fields=["title"],
+                ops=[write("title", "Modified Title")],
                 dry_run=True
             )
 
@@ -190,8 +189,7 @@ class TestProcessFile:
 
         result = process_file(
             str(audio_template),
-            ops={"title": write("title", "Same Title")},
-            targeted_fields=["title"],
+            ops=[write("title", "Same Title")],
             dry_run=False
         )
 
@@ -208,8 +206,7 @@ class TestProcessFile:
             
         result = process_file(
             str(audio_template),
-            ops={"composer": write("composer", "New Composer")},
-            targeted_fields=["composer"]
+            ops=[write("composer", "New Composer")],
         )
         
         assert result['passed'] is True
@@ -229,8 +226,7 @@ class TestProcessFile:
         
         result = process_file(
             str(audio_template),
-            ops={custom_field: write(custom_field, custom_value)},
-            targeted_fields=[custom_field],
+            ops=[write(custom_field, custom_value)],
             read_schema="extended" # Read extended to see custom tags
         )
         
@@ -261,8 +257,7 @@ class TestProcessFile:
              
              process_file(
                  str(audio_template),
-                 ops={},
-                 targeted_fields=[],
+                 ops=[],
                  read_schema="raw"
              )
              
@@ -280,8 +275,7 @@ class TestProcessFile:
         # 1. Process with 'canonical' schema -> Should NOT see custom tag in 'original'
         result_canonical = process_file(
             str(audio_template),
-            ops={},
-            targeted_fields=[],
+            ops=[],
             read_schema="canonical",
             dry_run=True 
         )
@@ -294,8 +288,7 @@ class TestProcessFile:
         # 2. Process with 'extended' schema -> Should see custom tag
         result_extended = process_file(
             str(audio_template),
-            ops={},
-            targeted_fields=[],
+            ops=[],
             read_schema="extended",
             dry_run=True
         )
@@ -319,8 +312,7 @@ class TestProcessFile:
         # Use force=True to prevent backup cleanup
         result = process_file(
             str(audio_template),
-            ops={"title": write("title", "New Title")},
-            targeted_fields=["title"],
+            ops=[write("title", "New Title")],
             dry_run=False,
             backup_dir=str(backup_dir),
             force=True  # Keep the backup
@@ -355,8 +347,7 @@ class TestProcessFile:
 
         result = process_file(
             str(invalid_file),
-            ops={"title": write("title", "New Title")},
-            targeted_fields=["title"]
+            ops=[write("title", "New Title")],
         )
 
         assert result['passed'] is False
@@ -370,8 +361,7 @@ class TestProcessFile:
         
         result = process_file(
             str(corrupt_file),
-            ops={"title": write("title", "New Title")},
-            targeted_fields=["title"]
+            ops=[write("title", "New Title")],
         )
         
         assert result['passed'] is False
@@ -384,16 +374,14 @@ class TestProcessFile:
         # 1. Set Title
         res1 = process_file(
             str(audio_template),
-            ops={"title": write("title", "First Title")},
-            targeted_fields=["title"]
+            ops=[write("title", "First Title")],
         )
         assert res1['passed'] is True
         
         # 2. Set Artist (verify Title remains)
         res2 = process_file(
             str(audio_template),
-            ops={"artist": write("artist", "Second Artist")},
-            targeted_fields=["artist"]
+            ops=[write("artist", "Second Artist")],
         )
         assert res2['passed'] is True
         
@@ -407,8 +395,7 @@ class TestProcessFile:
         # 1. Initial change
         res1 = process_file(
             str(audio_template),
-            ops={"album": write("album", "Test Album")},
-            targeted_fields=["album"]
+            ops=[write("album", "Test Album")],
         )
         assert res1['passed'] is True
         assert res1['wrote'] is True
@@ -416,8 +403,7 @@ class TestProcessFile:
         # 2. Apply SAME change
         res2 = process_file(
             str(audio_template),
-            ops={"album": write("album", "Test Album")},
-            targeted_fields=["album"]
+            ops=[write("album", "Test Album")],
         )
         assert res2['passed'] is True
         assert res2['wrote'] is False
@@ -429,8 +415,7 @@ class TestProcessFile:
         test_val = "Music 🎵 音楽 Μουσική Музыка"
         result = process_file(
             str(audio_template),
-            ops={"title": write("title", test_val)},
-            targeted_fields=["title"]
+            ops=[write("title", test_val)],
         )
         assert result['passed'] is True
         
@@ -444,8 +429,7 @@ class TestProcessFile:
         # Mutagen often keeps empty frames or drops them. core.py treats them as valid values.
         result = process_file(
             str(audio_template),
-            ops={"comment": write("comment", "")},
-            targeted_fields=["comment"]
+            ops=[write("comment", "")],
         )
         assert result['passed'] is True
         
@@ -465,8 +449,7 @@ class TestProcessFile:
         large_val = "x" * 102400 
         result = process_file(
             str(audio_template),
-            ops={"comment": write("comment", large_val)},
-            targeted_fields=["comment"],
+            ops=[write("comment", large_val)],
             verify=False  # Verification might fail if format truncates, but we want to check integrity
         )
         assert result['passed'] is True
@@ -488,8 +471,7 @@ class TestProcessFile:
         bad_val = "Start\x00End"
         result = process_file(
             str(audio_template),
-            ops={"title": write("title", bad_val)},
-            targeted_fields=["title"],
+            ops=[write("title", bad_val)],
             verify=False # Verification will likely fail due to stripping
         )
         assert result['passed'] is True
@@ -620,9 +602,7 @@ class TestParallelProcessing:
         with patch('mudio.processor._process_files_parallel') as mock_parallel:
             results = process_files(
                 files,
-                ops={"title": write("title", "New Title")},
-                targeted_fields=["title"],
-                use_parallel=True
+                ops=[write("title", "New Title")],
             )
 
             # Should not call parallel for small batches
@@ -645,9 +625,7 @@ class TestParallelProcessing:
 
             process_files(
                 files,
-                ops={"title": write("title", "New Title")},
-                targeted_fields=["title"],
-                use_parallel=True,
+                ops=[write("title", "New Title")],
                 verbose=False
             )
 
@@ -667,8 +645,7 @@ class TestParallelProcessing:
 
         results = _process_files_parallel(
             files,
-            ops={"title": write("title", "New Title")},
-            targeted_fields=["title"],
+            ops=[write("title", "New Title")],
             max_workers=2,  # Force 2 workers
             verbose=False
         )
@@ -677,7 +654,7 @@ class TestParallelProcessing:
         assert len(results) == len(files)
 
     def test_process_files_disable_parallel(self, tmp_path):
-        """Test disabling parallel processing."""
+        """Test disabling parallel processing with max_workers=1."""
         files = []
         header = b'ID3\x03\x00\x00\x00\x00\x0F'
         for i in range(20):
@@ -690,12 +667,12 @@ class TestParallelProcessing:
         with patch('mudio.processor._process_files_parallel') as mock_parallel:
             results = process_files(
                 files,
-                ops={"title": write("title", "New Title")},
-                targeted_fields=["title"],
-                use_parallel=False
+                ops=[write("title", "New Title")],
+                max_workers=1
             )
 
             mock_parallel.assert_not_called()
+            # It returns results in sequential mode
             assert len(results) == len(files)
 
 

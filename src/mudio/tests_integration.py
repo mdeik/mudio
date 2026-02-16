@@ -48,7 +48,7 @@ def run_single_test(file_path: Path, test_name: str, mode: str, fields_list: Lis
         return
 
     # Process file
-    rec = process_file(str(file_path), ops, target, filters=None, dry_run=False, backup_dir=None)
+    rec = process_file(str(file_path), ops, filters=None, dry_run=False, backup_dir=None)
     
     if rec.get('error'):
         results.append((test_name, False, rec['error']))
@@ -189,7 +189,7 @@ def create_test_definitions() -> List[Tuple]:
 
 def build_operations_for_test(mode: str, fields_list: List[str], params: Dict[str, str]) -> Tuple[FieldOperationsType, List[str]]:
     """Build operations based on mode and parameters."""
-    ops = {}
+    ops = []
     target = []
     
     if mode == 'overwrite':
@@ -197,24 +197,24 @@ def build_operations_for_test(mode: str, fields_list: List[str], params: Dict[st
         for field in fields_list:
             param_key = f'value_{field}' if field in ['title', 'album', 'artist', 'albumartist', 'genre', 'comment', 'composer', 'performer'] else field
             if param_key in params:
-                ops[field] = overwrite(field, params[param_key])
+                ops.append(overwrite(field, params[param_key]))
                 target.append(field)
     
     elif mode == 'find-replace':
         for field in fields_list:
             if 'find' in params and 'replace' in params:
-                ops[field] = find_replace(field, params['find'], params['replace'], params.get('regex', False))
+                ops.append(find_replace(field, params['find'], params['replace'], params.get('regex', False)))
                 target.append(field)
     
     elif mode == 'append':
         for field in fields_list:
             if 'value' in params:
-                ops[field] = append(field, params['value'])
+                ops.append(append(field, params['value']))
                 target.append(field)
     
     elif mode == 'clear':
         for field in fields_list:
-            ops[field] = clear(field)
+            ops.append(clear(field))
             target.append(field)
     
     return ops, target

@@ -17,7 +17,7 @@ from .operations import (
     compute_new_fields,
     apply_filter
 )
-from .processor import process_file, validate_file, verify_written, collect_files_generator
+from .processor import process_file, process_files, validate_file, verify_written, collect_files_generator
 from .batch import process_batch
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "compute_new_fields",
     "apply_filter",
     "process_file",
+    "process_files",
     "validate_file",
     "verify_written",
     "collect_files_generator",

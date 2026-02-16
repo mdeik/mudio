@@ -29,18 +29,18 @@ SUPPORTED_EXT = {'.mp3', '.flac', '.m4a', '.mp4', '.ogg', '.opus', '.wav'}
 # Order matters: this defines the order of CANONICAL_FIELDS
 CANON = {
     "title": {"title", "tit2"},
-    "artist": {"artist", "tpe1"},
+    "artist": {"artist", "artists", "tpe1"},
     "album": {"album", "talb"},
-    "albumartist": {"albumartist", "album_artist", "tpe2", "aart"},
+    "albumartist": {"albumartist", "albumartists", "album_artist", "album artist", "album_artists", "album artists", "tpe2", "aart"},
     "genre": {"genre", "tcon"},
     "comment": {"comment", "comm"},
     "composer": {"composer", "tcom"},
     "performer": {"performer", "performers", "perf", "tpe3"},
     "date": {"date", "year", "originaldate", "tdrc", "tory", "tdat"},
-    "track": {"track", "tracknumber", "trck"},
-    "totaltracks": {"totaltracks", "tracktotal"},
-    "disc": {"disc", "discnumber", "tpos"},
-    "totaldiscs": {"totaldiscs", "disctotal"},
+    "track": {"track", "tracknumber", "track number", "track_number", "trck"},
+    "totaltracks": {"totaltracks", "tracktotal", "track_total", "track total"},
+    "disc": {"disc", "discnumber", "disc number", "disc_number", "tpos"},
+    "totaldiscs": {"totaldiscs", "disctotal", "disc_total", "disc total"},
 }
 
 CANONICAL_FIELDS = list(CANON.keys())
@@ -50,11 +50,17 @@ _CANON_LOOKUP = {}
 for canon, aliases in CANON.items():
     _CANON_LOOKUP[canon] = canon
     for alias in aliases:
+        # Store alias as is
         _CANON_LOOKUP[alias] = canon
+        # Store alias with hyphens/spaces replaced by underscores
+        normalized_alias = alias.replace('-', '_').replace(' ', '_')
+        _CANON_LOOKUP[normalized_alias] = canon
 
 def canon_key(k: str) -> str:
     """
     Normalize key to canonical form if known, otherwise return lowercase string.
+    Handles hyphens, underscores, and spaces interchangeably (e.g., 
+    'album-artist', 'album_artist', and 'album artist' all map to 'albumartist').
     
     Args:
         k: Key to normalize
@@ -63,7 +69,20 @@ def canon_key(k: str) -> str:
         Canonical key or lowered key
     """
     k_norm = k.strip().lower()
-    return _CANON_LOOKUP.get(k_norm, k.strip())
+    
+    # Try direct lookup first (this will handle original aliases and canonical keys)
+    if k_norm in _CANON_LOOKUP:
+        return _CANON_LOOKUP[k_norm]
+    
+    # If not found, try normalizing hyphens and spaces to underscores
+    # This step is now redundant because _CANON_LOOKUP already stores these variations.
+    # However, keeping it for robustness if _CANON_LOOKUP generation changes or for keys not in CANON.
+    k_with_underscores = k_norm.replace('-', '_').replace(' ', '_')
+    if k_with_underscores in _CANON_LOOKUP:
+        return _CANON_LOOKUP[k_with_underscores]
+    
+    # Return original string (stripped) if no match to preserve case for custom keys
+    return k.strip()
 
 class MudioError(Exception):
     """Base exception for Mudio errors."""

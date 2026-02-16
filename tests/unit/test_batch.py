@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from mudio.batch import process_batch, set_fields
+from mudio.batch import process_batch, write_fields
 from mudio.operations import write, append
 import tempfile
 import shutil
@@ -15,8 +15,7 @@ def test_process_batch_basic(temp_audio_dir):
     """Test basic batch processing."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'New Title')},
-        fields=['title'],
+        operations=[write('title', 'New Title')],
         dry_run=True
     )
     
@@ -32,8 +31,7 @@ def test_process_batch_recursive(temp_audio_dir):
     """Test recursive file collection."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'New Title')},
-        fields=['title'],
+        operations=[write('title', 'New Title')],
         recursive=True,
         dry_run=True
     )
@@ -45,8 +43,7 @@ def test_process_batch_extension_filter(temp_audio_dir):
     """Test file extension filtering."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'New Title')},
-        fields=['title'],
+        operations=[write('title', 'New Title')],
         extensions=['.mp3'],
         dry_run=True
     )
@@ -62,8 +59,7 @@ def test_process_batch_empty_directory(tmp_path):
     
     result = process_batch(
         empty_dir,
-        operations={'title': write('title', 'New Title')},
-        fields=['title']
+        operations=[write('title', 'New Title')],
     )
     
     assert result['processed'] == 0
@@ -73,8 +69,7 @@ def test_process_batch_nonexistent_path():
     """Test handling of non-existent path."""
     result = process_batch(
         "/nonexistent/path",
-        operations={'title': write('title', 'New Title')},
-        fields=['title']
+        operations=[write('title', 'New Title')],
     )
     
     assert result['processed'] == 0
@@ -88,8 +83,7 @@ def test_process_batch_no_matching_files(tmp_path):
     
     result = process_batch(
         dir_with_txt,
-        operations={'title': write('title', 'New Title')},
-        fields=['title']
+        operations=[write('title', 'New Title')],
     )
     
     assert result['processed'] == 0
@@ -99,8 +93,7 @@ def test_process_batch_with_filters(temp_audio_dir):
     """Test batch processing with filters - adjust expectations for dummy files."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'Filtered Title')},
-        fields=['title'],
+        operations=[write('title', 'Filtered Title')],
         filters=[('artist', 'NonExistentArtist', False)],  # Filter that matches nothing
         dry_run=True
     )
@@ -116,8 +109,7 @@ def test_process_batch_backup_creation(temp_audio_dir, tmp_path):
     
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'New Title')},
-        fields=['title'],
+        operations=[write('title', 'New Title')],
         backup_dir=backup_dir,
         dry_run=True
     )
@@ -140,10 +132,8 @@ def test_process_batch_parallel_parameter(temp_audio_dir):
         # Verify no errors with parallel parameters
         result = process_batch(
             temp_audio_dir,
-            operations={'title': write('title', 'New Title')},
-            fields=['title'],
+            operations=[write('title', 'New Title')],
             max_workers=4,
-            use_parallel=True,
             dry_run=True
         )
         
@@ -155,9 +145,9 @@ def test_process_batch_parallel_parameter(temp_audio_dir):
     finally:
         Config.MIN_FILES_FOR_PARALLEL = original_min
 
-def test_set_fields_convenience_function(temp_audio_dir):
-    """Test the set_fields convenience wrapper."""
-    result = set_fields(
+def test_write_fields_convenience_function(temp_audio_dir):
+    """Test the write_fields convenience wrapper."""
+    result = write_fields(
         temp_audio_dir,
         fields={'title': 'Set Title', 'artist': 'Set Artist'},
         dry_run=True
@@ -172,10 +162,10 @@ def test_set_fields_convenience_function(temp_audio_dir):
             assert r['planned'].get('title') == ['Set Title']
             assert r['planned'].get('artist') == ['Set Artist']
 
-def test_set_fields_invalid_field():
-    """Test set_fields with invalid field name."""
+def test_write_fields_invalid_field():
+    """Test write_fields with invalid field name."""
     with pytest.raises(ValueError, match="Invalid field"):
-        set_fields(
+        write_fields(
             ".",
             fields={'invalid_field': 'value'}
         )
@@ -185,8 +175,7 @@ def test_process_batch_verbose_logging(temp_audio_dir, caplog):
     with caplog.at_level(logging.INFO):
         result = process_batch(
             temp_audio_dir,
-            operations={'title': write('title', 'New Title')},
-            fields=['title'],
+            operations=[write('title', 'New Title')],
             verbose=True,
             dry_run=True
         )
@@ -199,8 +188,7 @@ def test_process_batch_force_parameter(temp_audio_dir):
     """Test force parameter handling."""
     result = process_batch(
         temp_audio_dir,
-        operations={'title': write('title', 'Forced Title')},
-        fields=['title'],
+        operations=[write('title', 'Forced Title')],
         force=True,
         dry_run=True
     )

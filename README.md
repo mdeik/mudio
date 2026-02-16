@@ -7,7 +7,7 @@
 
 ## Features
 
--   **Unified API**: Write code once, run it on MP3, FLAC, M4A, WAV, OGG, OPUS, and WavPack.
+-   **Unified API**: Write code once, run it on MP3, FLAC, M4A, WAV, OGG, and OPUS.
 -   **Batch Processing**: robust CLI for processing thousands of files.
 -   **Parallel Execution**: Automatically uses multi-threading for large batches.
 -   **Safety First**: Built-in **backup** system, **dry-run** mode, and careful validation.
@@ -33,80 +33,57 @@ pip install mudio
 
 ## CLI Usage
 
-`mudio` is designed for efficient batch operations.
-
-### Basic Commands
-
+### Simple: Update metadata for files
 ```bash
-# View metadata (truncated if long)
-mudio song.mp3 --operation print
-
-# Set Album
-mudio *.mp3 --operation write --fields album --value "New Album"
-
-# Overwrite Title
-mudio song.flac --operation write --fields title --value "My Song"
+# Set album name for all MP3 files
+mudio *.mp3 --operation write --fields album --value "Greatest Hits"
 ```
 
-### Advanced Batch Operations
-
+### Advanced: Conditional batch processing with backup
 ```bash
-# Regex Find & Replace (Fix features)
-# Changes "feat." -> "ft." in title and artist
-mudio /music --recursive \
-  --operation find-replace --find "feat\." --replace "ft." --regex \
-  --fields title,artist
-
-# Append to Comment
-mudio *.m4a --operation append --fields comment --value " [Remastered]"
-
-# Filtered Processing
-# Only add "Rock" genre to tracks by "Led Zeppelin"
-mudio /library --recursive \
-  --filter "artist=Led Zeppelin" \
-  --operation write --fields genre --value "Rock"
+# Fix title formatting for 1990s Rock tracks, with backups and regex
+mudio /music --recursive --backup ./backups \
+  --filter-regex --filter "date=^199" --filter "genre=Rock" \
+  --operation find-replace --fields title --find "\s+" --replace " " --regex
 ```
 
-### Safety Features
-
-```bash
-# Dry Run (See what would happen without modifying files)
-mudio *.mp3 --operation write --fields album --value "Test" --dry-run
-
-# Create Backups (Kept by default in ./backups/)
-mudio *.flac --operation clear --fields comment --backup ./backups
-
-# Delete backups after successful operation (to save space)
-mudio *.mp3 --operation write --fields album --value "New" --backup ./backups --delete-backups
-```
+> **💡 Tip**: Use `--dry-run` to preview changes before applying them.
 
 ## Python Library Usage
 
-`mudio` provides a Pythonic wrapper around `mutagen` for scripts and tools.
-
+### Simple: Read and write metadata
 ```python
-from mudio import SimpleMusic
+from mudio.processor import process_file
+from mudio.operations import write
 
-# Reading metadata (extended mode by default - includes custom fields)
-with SimpleMusic("song.flac") as sm:
-    fields = sm.read_fields()  # Default: schema='extended'
-    print(fields)
-    # {'artist': ['The Band'], 'title': ['The Song'], ...}
+# Update a single file with automatic verification
+result = process_file(
+    "song.mp3",
+    ops=[write('artist', 'The Beatles')]
+)
+print(f"Success: {result['passed']}")  # True if successful
+```
 
-# Read with different schemas
-with SimpleMusic("song.mp3") as sm:
-    canonical = sm.read_fields(schema='canonical')  # Only standard fields
-    raw = sm.read_fields(schema='raw')  # Format-specific keys (TIT2, TPE1, etc.)
-    extended = sm.read_fields(schema='extended')  # Standard + custom fields
+### Advanced: Batch processing with operations
+```python
+from mudio.processor import process_files
+from mudio.operations import write, enlist, find_replace
+from pathlib import Path
 
-# Writing
-with SimpleMusic("song.mp3") as sm:
-    sm.write_fields({
-        'title': ['New Title'],
-        'genre': ['Pop', 'Rock']  # Multi-value support
-    })
+# Process multiple files with complex operations
+results = process_files(
+    Path('music').rglob('*.flac'),
+    ops=[
+        enlist('genre', 'Rock;Classic'),           # Add genres if not present
+        find_replace('title', r'\s+', ' ', regex=True),  # Normalize whitespace
+        write('albumartist', 'Various Artists')
+    ],
+    filters=[('date', '^199', True)],  # Only 1990s tracks (regex)
+    backup_dir='./backups',
+    max_workers=4
+)
 
-# Error handling is managed by the context manager
+print(f"Updated {sum(r['passed'] for r in results)} files")
 ```
 
 ### Environment Variables
@@ -115,7 +92,6 @@ You can configure `mudio`'s default behavior using environment variables:
 
 - **`MUDIO_SCHEMA`**: Set default schema for reading metadata (`canonical`, `extended`, or `raw`). Default: `extended`.
 - **`MUDIO_MAX_WORKERS`**: Default thread count for parallel processing.
-- **`MUDIO_BACKUP_DIR`**: Default backup location.
 - **`MUDIO_VERBOSE`**: Default verbosity (`0` or `1`).
 - **`MUDIO_NAMESPACE`**: Namespace for custom MP4/M4A fields (default: `com.apple.iTunes`). Setting this to something else (e.g. `org.myproject`) allows isolating your custom tags.
 
@@ -127,30 +103,66 @@ python your_script.py
 
 ## Behavior Notes
 
-### Canonical Field Handling (All Formats)
+### Field Handling (All Formats)
 
 `mudio` normalizes metadata to a **case-insensitive canonical schema** and applies consistent frame/value rules across formats.
 
 #### Reading
 
-* **Canonical keys**: Raw tags that differ only by case or alias are merged into one canonical field (e.g., `GENRE`, `genre` → `genre`; ReplayGain variants collapse).
-* **Frame-level deduplication**: If multiple frames for a canonical field contain the *same ordered list of values* (after normalization), only the first is kept.
+* **Canonical fields**: Tags that differ only by case or alias are merged via alias mapping (e.g., `GENRE`, `genre`, `tcon` → `genre`).
+* **Custom fields**: Unrecognized (non-canonical) keys are normalized to **small snake case** (`[a-z0-9_]`). Non-alphanumeric characters are replaced with `_`. Alternative casings are merged (e.g., `MyField`, `my-field` → `my_field`).
+* **Frame-level deduplication**: If multiple frames for a field contain the *same ordered list of values* (after normalization), only the first is kept.
 * **Intra-frame duplicates**: Duplicates *within* a single frame are preserved.
 * **Distinct frames**: Frames with different value sequences are preserved and flattened in first-seen order.
-* **Unknown fields**: Unrecognized keys are normalized (lowercase) and preserved.
-* **Key Sanitization**:
-    * **Reading**: Keys are sanitized to **small snake case** (`[a-z0-9_]`). Non-alphanumeric characters are replaced with `_`.
-    * **Writing**: Custom keys are sanitized to **caps snake case** (`[A-Z0-9_]`). Non-alphanumeric characters are replaced with `_`.
-    * **Alternative Casing**: `mudio` drops alternative casing for custom fields to prevent duplicates (e.g., `MyField` and `myfield` are treated as the same field).
+
+**Example - Custom Field Reading:**
+```python
+# File has tags: "MyCustomField", "my-custom-field", "MYCUSTOMFIELD"
+# All merge to a single key on read
+fields = sm.read_fields(schema='extended')
+# Result: {'my_custom_field': ['value1', 'value2', 'value3'], ...}
+```
 
 #### Writing
 
-* **Canonical-only state**: Input keys are normalized and merged before write.
-* **Single emission per field**: Each canonical field is written once via the format-specific emitter (e.g., ID3 frames, Vorbis comments, MP4 atoms). Aliases are not written.
-* **Value collapse**: All values for a canonical field are emitted according to the target format’s conventions (including required frames/atoms), without duplicating equivalent aliases.
+* **Canonical fields**: Input keys are normalized via alias mapping and merged before write. Each canonical field is written once to its format-specific native tag (e.g., ID3 `TIT2`, MP4 `©nam`, Vorbis `TITLE`). Aliases are not written.
+* **Custom fields**: Keys are sanitized to **caps snake case** (`[A-Z0-9_]`). Non-alphanumeric characters are replaced with `_`.
+* **Value collapse**: All values for a field are emitted according to the target format's conventions, without duplicating equivalent aliases.
 * **Deterministic output**: Ordering reflects first occurrence after merge and deduplication.
 
+**Example - Custom Field Writing:**
+```python
+# Writing with various custom key formats
+sm.write_fields({
+    'my-custom-field': ['value1'],  # Written as: MY_CUSTOM_FIELD
+    'AnotherField': ['value2'],      # Written as: ANOTHERFIELD
+    'some.special!key': ['value3']   # Written as: SOME_SPECIAL_KEY
+})
+```
+
 This ensures consistent behavior across file types while preventing casing/alias duplicates.
+
+### Canonical Fields Reference
+
+The following canonical fields are recognized by `mudio`. All aliases (including case variations) map to the canonical field name:
+
+| Canonical Field | Recognized Aliases |
+|----------------|-------------------|
+| `title` | `title`, `tit2` |
+| `artist` | `artist`, `tpe1` |
+| `album` | `album`, `talb` |
+| `albumartist` | `albumartist`, `album_artist`, `tpe2`, `aart` |
+| `genre` | `genre`, `tcon` |
+| `comment` | `comment`, `comm` |
+| `composer` | `composer`, `tcom` |
+| `performer` | `performer`, `performers`, `perf`, `tpe3` |
+| `date` | `date`, `year`, `originaldate`, `tdrc`, `tory`, `tdat` |
+| `track` | `track`, `tracknumber`, `trck` |
+| `totaltracks` | `totaltracks`, `tracktotal` |
+| `disc` | `disc`, `discnumber`, `tpos` |
+| `totaldiscs` | `totaldiscs`, `disctotal` |
+
+**Note**: All comparisons are case-insensitive. For example, `TITLE`, `Title`, and `title` all map to `title`.
 
 ## Comparison with Alternatives
 

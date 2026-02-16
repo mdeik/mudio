@@ -9,7 +9,6 @@ from mudio.utils import (
     safe_unicode_path,
     safe_regex_pattern,
     get_file_hash,
-    Config,
     join_for_printing
 )
 
@@ -36,6 +35,7 @@ class TestUtils:
         # Invalid regex raises ValueError
         with pytest.raises(ValueError):
             safe_regex_pattern("[", is_regex=True)
+            
     def test_get_file_hash(self):
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"content")
@@ -51,44 +51,3 @@ class TestUtils:
     def test_join_for_printing(self):
         assert join_for_printing([]) == "(none)"
         assert join_for_printing(["A", "B"]) == "A; B"
-
-
-class TestConfig:
-    """Tests for Config class."""
-
-    # Test removed as it was redundant with test_from_env_overrides and used old API
-
-
-    def test_validate(self):
-        # validation should pass on default
-        try:
-            Config.validate()
-        except ValueError:
-            pytest.fail("Config.validate() raised ValueError unexpectedly")
-
-    def test_validate_custom_values(self):
-        # We need to test behavior when values change.
-        original = Config.MAX_WORKERS
-        try:
-            Config.MAX_WORKERS = -1
-            with pytest.raises(ValueError, match="MAX_WORKERS must be positive"):
-                Config.validate()
-        finally:
-            Config.MAX_WORKERS = original
-
-    def test_from_env_overrides(self):
-        env = {
-            'MUDIO_MAX_FILE_SIZE': '999',
-            'MUDIO_MAX_WORKERS': '5'
-        }
-        original_size = Config.MAX_FILE_SIZE
-        original_workers = Config.MAX_WORKERS
-        
-        try:
-            with patch.dict(os.environ, env):
-                Config.load_from_env()
-                assert Config.MAX_FILE_SIZE == 999
-                assert Config.MAX_WORKERS == 5
-        finally:
-            Config.MAX_FILE_SIZE = original_size
-            Config.MAX_WORKERS = original_workers

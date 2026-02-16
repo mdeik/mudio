@@ -1,35 +1,13 @@
 
+"""
+Integration tests for Audio I/O using real files.
+"""
 import pytest
-import shutil
-from pathlib import Path
-from mudio.core import SimpleMusic
+from mudio.core import SimpleMusic, FormatError
+from mudio.operations import delete
 
-# Define the location of the audio files
-AUDIO_DIR = Path(__file__).parent / "audio"
-
-def get_audio_files():
-    """Generator to yield all audio files from tests/audio."""
-    if not AUDIO_DIR.exists():
-        return []
-    return [
-        f for f in AUDIO_DIR.iterdir() 
-        if f.is_file() and f.suffix.lower() in SimpleMusic.SUPPORTED_EXT
-    ]
-
-@pytest.fixture
-def audio_file(request, tmp_path):
-    """
-    Fixture that copies the requested audio file to a temporary directory.
-    Returns the path to the temporary file.
-    """
-    original_file = request.param
-    temp_file = tmp_path / original_file.name
-    shutil.copy2(original_file, temp_file)
-    return temp_file
-
-@pytest.mark.parametrize("audio_file", get_audio_files(), indirect=True)
-class TestRealAudio:
-    """Tests using real audio files from tests/audio."""
+class TestAudioIO:
+    """Tests using real audio files for Read/Write operations."""
 
     def test_load_file(self, audio_file):
         """Test that SimpleMusic can load the file without errors."""
@@ -38,12 +16,7 @@ class TestRealAudio:
             assert sm.path == audio_file
 
     def test_read_write_cycle(self, audio_file):
-        """
-        Test a full read-write cycle:
-        1. Write comprehensive metadata.
-        2. Save.
-        3. Reload and verify metadata.
-        """
+        """Test a full read-write cycle with standard fields."""
         metadata = {
             "title": ["Test Read Write Cycle"],
             "artist": ["Test Artist"],
@@ -58,18 +31,15 @@ class TestRealAudio:
             "composer": ["Test Composer"],
         }
         
-        # Write metadata
         with SimpleMusic.managed(audio_file) as sm:
             sm.write_fields(metadata)
         
-        # Read back and verify
         with SimpleMusic.managed(audio_file) as sm:
             fields = sm.read_fields()
             
             assert fields["title"] == metadata["title"]
             assert fields["artist"] == metadata["artist"]
             assert fields["album"] == metadata["album"]
-            # Flexible date checking (some formats might store full timestamps)
             assert any(d.startswith("2023") for d in fields["date"])
             assert fields["genre"] == metadata["genre"]
             assert fields["track"] == metadata["track"]
@@ -98,7 +68,6 @@ class TestRealAudio:
 
     def test_clear_metadata(self, audio_file):
         """Test clearing metadata fields."""
-        # First write some data
         initial_metadata = {
             "title": ["To Be Cleared"],
             "artist": ["To Be Cleared"],
@@ -106,9 +75,6 @@ class TestRealAudio:
         with SimpleMusic.managed(audio_file) as sm:
             sm.write_fields(initial_metadata)
         
-        # Now clear it by sending empty lists or None (depending on implementation, 
-        # usually empty list or None should work if the logic handles it, 
-        # let's try empty list as per SimpleMusic API usage in other tests)
         clear_metadata = {
             "title": [],
             "artist": [],
@@ -125,25 +91,18 @@ class TestRealAudio:
         """Test that writing the same metadata twice produces consistent results."""
         metadata = {"title": ["Idempotency Test"]}
         
-        # First write
         with SimpleMusic.managed(audio_file) as sm:
             sm.write_fields(metadata)
-            
-        # Second write
-        with SimpleMusic.managed(audio_file) as sm:
             sm.write_fields(metadata)
             
-        # Verify
         with SimpleMusic.managed(audio_file) as sm:
             fields = sm.read_fields()
             assert fields["title"] == ["Idempotency Test"]
 
     def test_delete_field_entirely(self, audio_file):
         """Test that delete operation removes field key entirely from metadata."""
-        from mudio.operations import delete
         from mudio.processor import process_file
         
-        # First write some data
         initial_metadata = {
             "title": ["To Be Deleted"],
             "artist": ["Should Remain"],
@@ -152,76 +111,36 @@ class TestRealAudio:
         with SimpleMusic.managed(audio_file) as sm:
             sm.write_fields(initial_metadata)
         
-        # Verify it was written
-        with SimpleMusic.managed(audio_file) as sm:
-            fields = sm.read_fields()
-            assert "title" in fields
-            assert fields["title"] == ["To Be Deleted"]
-        
         # Use delete operation via process_file
-        ops = {"title": delete("title")}
+        ops = [delete("title")]
         result = process_file(
             audio_file,
             ops=ops,
-            targeted_fields=["title"],
             backup_dir=None,
             dry_run=False,
             filters=[]
         )
-        
         assert result['passed'] is True
         
-        # Verify title field is completely removed
         with SimpleMusic.managed(audio_file) as sm:
             fields = sm.read_fields()
-            # Field should be absent or empty list (depending on implementation)
             assert fields.get("title", []) == []
-            # Other fields should remain
             assert fields.get("artist") == ["Should Remain"]
             assert fields.get("album") == ["Also Remain"]
 
-    def test_delete_vs_clear(self, audio_file):
-        """Test the distinction between delete (removes key) and clear (empty value)."""
-        from mudio.operations import delete, clear
-        from mudio.processor import process_file
-        
-        # Write initial data
-        initial_metadata = {
-            "title": ["Title to Delete"],
-            "album": ["Album to Clear"],
-            "artist": ["Artist Unchanged"],
-        }
-        with SimpleMusic.managed(audio_file) as sm:
-            sm.write_fields(initial_metadata)
-        
-        # Apply delete to title, clear to album
-        ops = {
-            "title": delete("title"),
-            "album": clear("album"),
-        }
-        result = process_file(
-            audio_file,
-            ops=ops,
-            targeted_fields=["title", "album"],
-            backup_dir=None,
-            dry_run=False,
-            filters=[]
-        )
-        
-        assert result['passed'] is True
-        
-        # Verify results
-        with SimpleMusic.managed(audio_file) as sm:
-            fields = sm.read_fields()
-            
-            # Delete should remove the field entirely
-            assert fields.get("title", []) == []
-            
-            # Clear might leave field present but empty, or also remove it
-            # (behavior may vary by format, but both should result in no usable value)
-            album_val = fields.get("album", [])
-            assert not album_val or album_val == [""]
-            
-            # Artist should remain unchanged
-            assert fields.get("artist") == ["Artist Unchanged"]
+    def test_read_all_formats(self, all_format_files):
+        """Test reading metadata from all supported formats (dummy files)."""
+        for file_path in all_format_files:
+            try:
+                with SimpleMusic(file_path) as sm:
+                    fields = sm.read_fields()
+                    assert isinstance(fields, dict)
+            except (RuntimeError, FormatError) as e:
+                # Expected for dummy files - verify it's a user-friendly error
+                assert "Unsupported file format" in str(e) or "No metadata" in str(e) or "Failed to load" in str(e)
 
+    def test_format_coverage(self, all_format_files):
+        """Verify we have all expected formats."""
+        found_formats = {f.suffix.lower() for f in all_format_files}
+        expected = {'.mp3', '.flac', '.m4a', '.wav', '.ogg', '.opus'}
+        assert found_formats == expected

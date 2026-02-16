@@ -18,8 +18,7 @@ These options apply to all operations.
 | :--- | :--- |
 | `--recursive` | Recursively search for audio files in subdirectories. |
 | `--ext LIST` | Comma-separated list of extensions to process (e.g. `mp3,flac`). Defaults to all supported types. |
-| `--threads N` | Number of threads to use for parallel processing. Default: `0` (auto-detect based on CPU count). |
-| `--no-parallel` | Force sequential processing (single-threaded). |
+| `--threads N` | Number of threads to use for parallel processing. Default: `0` (auto-detect based on CPU count). Set to `1` for sequential processing. |
 | `--dry-run` | Simulation mode. Shows what *would* change without modifying files. |
 | `--verbose` | Enable verbose logging and progress output. |
 | `--backup DIR` | Create backups of original files in `DIR` before modifying. |
@@ -36,76 +35,41 @@ These options apply to all operations.
 
 Select an operation using `--operation NAME`.
 
-### `write`
-Writes specific metadata fields using a convenient syntax. This is the primary operation for assigning values.
-*   **Use Case**: Precision editing of standard tags (dates, track numbers) or batch assignment of arbitrary fields.
-*   **Requires**: `--fields` and `--value`.
-*   **Arguments**:
-    *   `--fields LIST`: Comma-separated list of fields to set (e.g. `album`, `date`, `track`).
-    *   `--value VAL`: The value to assign to the specified fields.
-*   **Multi-value**: Use `--delimiter` to split values (e.g. `mudio . --operation write --fields genre --value "Rock|Pop" --delimiter "|"`)
-*   **Example**: `mudio . --operation write --fields track --value "1"`
+| Operation | Purpose | Required Args | Example |
+|-----------|---------|---------------|----------|
+| **`print`** | Display metadata to console | None | `mudio song.mp3 --operation print` |
+| **`write`** | Set field value(s) | `--fields`, `--value` | `mudio . --operation write --fields artist --value "Beatles"` |
+| **`append`** | Add to existing value | `--fields`, `--value` | `mudio . --operation append --fields title --value " (Remix)"` |
+| **`prefix`** | Prepend to value(s) | `--fields`, `--value` | `mudio . --operation prefix --fields title --value "[2024] "` |
+| **`find-replace`** | Find/replace text | `--fields`, `--find`, `--replace` | `mudio . --operation find-replace --fields title --find "_" --replace " "` |
+| **`enlist`** | Add to multi-valued field (if not present) | `--fields`, `--value` | `mudio . --operation enlist --fields genre --value "Rock"` |
+| **`delist`** | Remove from multi-valued field | `--fields`, `--value` | `mudio . --operation delist --fields genre --value "Pop"` |
+| **`clear`** | Set field to empty string | `--fields` | `mudio . --operation clear --fields comment` |
+| **`delete`** | Remove field entirely | `--fields` | `mudio . --operation delete --fields lyrics` |
+| **`purge`** | ⚠️ Remove ALL metadata | None | `mudio . --operation purge --dry-run` |
 
-### `print`
-Prints the metadata of the files to the console in a readable format.
-*   **Options**:
-    *   `--schema SCHEMA`: Metadata schema to use. Choices:
-        - `canonical`: Standard fields only.
-        - `extended`: Standard + custom fields (default).
-        - `raw`: Raw tag keys (e.g. TIT2).
-*   **Behavior**: Long fields (>150 characters) are truncated with `...`.
-*   **Requires**: None.
+### Operation Details
 
-### `delete`
-Removes the specified fields entirely from the file (deletes the key).
-*   **Requires**: `--fields`.
-*   **Example**: `mudio . --operation delete --fields comment,lyrics`
+**`print`**
+- Schema options via `--schema`: `canonical` (standard fields), `extended` (+ custom fields), `raw` (format-specific keys)
+- Long fields (>150 chars) are truncated with `...`
 
-### `clear`
-Writes the specified fields to an empty value (e.g. empty string), without removing the key (if format supports empty tags).
-*   **Requires**: `--fields`.
-*   **Use Case**: When you want to blank out a field but keep the tag present (rare, usually `delete` is preferred).
-*   **Note**: Behavior of empty values varies by format. ID3 tags may store empty frames; Vorbis comments typically omit empty values.
+**`write`**
+- Multi-value: Use `--delimiter` to split (e.g., `--value "Rock;Pop"` creates two genre entries)
+- Primary operation for setting tags
 
-### `append`
-Appends a value to the existing field.
-*   **Behavior**:
-    *   **Single-valued fields** (e.g. title): Appends text to the string **as-is**.
-        *   Example: `--value "[Remix]"` -> "Title[Remix]" (No space).
-        *   To add space: `--value " [Remix]"` -> "Title [Remix]".
-    *   **Multi-valued fields** (e.g. artist): Adds a new entry (e.g. ["Artist A"] -> ["Artist A", "New Artist"]).
-*   **Requires**: `--fields`, `--value`.
+**`append` / `prefix`**
+- **Single-valued** fields (title, album): Appends/prepends directly to string
+  - Note: `append` adds text as-is (no space added automatically)
+- **Multi-valued** fields (artist, genre): Applies to all values
 
-### `prefix`
-Prepends a value to the existing field.
-*   **Behavior**:
-    *   **Single-valued**: "Title" -> "Prefix Title"
-    *   **Multi-valued**: "Artist A" -> "Prefix Artist A" (Applied to ALL values).
-*   **Requires**: `--fields`, `--value`.
+**`find-replace`**
+- Add `--regex` flag to use regex patterns
+- Example: `--find "^Track" --replace "Song" --regex`
 
-### `enlist`
-Adds a value to a multi-valued field only if it does not already exist.
-*   **Requires**: `--fields`, `--value`.
-*   **Example**: `mudio . --operation enlist --fields genre --value "Pop"`
-
-### `delist`
-Removes specific value(s) from a multi-valued field.
-*   **Requires**: `--fields`, `--value`.
-*   **Example**: `mudio . --operation delist --fields genre --value "Rock"`
-
-
-### `find-replace`
-Search and replace text within tags.
-*   **Requires**: `--fields`, `--find`, `--replace`.
-*   **Options**:
-    *   `--regex`: Treat the `--find` pattern as a Regular Expression.
-*   **Warning**: If the replacement result contains the delimiter (default `;`), it will be split into multiple values for multi-valued fields.
-    *   Example: replacing "and" with ";" in "A and B" results in ["A ", " B"].
-*   **Example**: `mudio . --operation find-replace --fields title --find "feat." --replace "ft."`
-
-### `purge`
-**DANGER**: Removes ALL metadata tags from the files, leaving them clean.
-*   **Requires**: None (implicitly targets all fields).
+**`enlist` / `delist`**
+- Case-insensitive matching
+- Only for multi-valued fields (artist, genre, albumartist, composer, performer)
 
 ---
 
@@ -169,9 +133,9 @@ Apply changes only to files that match specific criteria using `--filter`.
     *   To match a generic pattern with spaces in regex: `--filter-regex --filter "title=.*Love.*"`
 
 **Examples**:
-*   `--filter artist="The Beatles"`: Matches tracks by The Beatles.
-*   `--filter "title=Love"`: Matches tracks with "Love" in the title.
-*   `--filter-regex --filter "date=^199."`: Matches tracks from the 90s.
+*   `--filter artist="The Beatles"`: Only process files by The Beatles.
+*   `--filter "title=Love"`: Only process files with "Love" anywhere in the title.
+*   `--filter-regex --filter "date=^199"`: Only process files from the 1990s.
 
 ---
 
@@ -206,29 +170,55 @@ Use `--backup PATH` to save copies of files before they are modified.
 
 ## Common Patterns
 
-### Copy Metadata
-To copy specific metadata from one batch of files to another structure (implied manual process as `mudio` operates in-place):
-Currently `mudio` focuses on in-place modification. To copy tags, you would typically read valid tags from one source and apply them to another script-wise.
-
-### Fix "Various Artists" Compilations
-To ensure compilations are grouped correctly:
-
+### Preview Changes Before Applying
+Always use `--dry-run` first to see what will change:
 ```bash
-# Set Album Artist to "Various Artists" and compilation flag (if supported by format)
-mudio . --operation write --fields albumartist --value "Various Artists" --filter "compilation=1"
+mudio music/ --operation write --fields albumartist --value "Various Artists" --recursive --dry-run
 ```
 
-### Normalize Messy Metadata
-Clean up inconsistent capitalization:
-
+### Set Metadata with Backup
+Create backups before modifying files:
 ```bash
-# This requires a script using `mudio` library as CLI only supports fixed transformations
+mudio album/ --operation write --fields date --value "2024" --recursive --backup ./backups
 ```
-Actually, CLI supports regex find-replace:
 
+### Clean Up Title Formatting
 ```bash
-# Replace underscores with spaces in titles
-mudio . --operation find-replace --fields title --find "_" --replace " "
+# Remove unwanted text from titles
+mudio . --operation find-replace --fields title --find " (Demo)" --replace "" --recursive
+
+# Normalize whitespace with regex
+mudio . --operation find-replace --fields title --find "\\s+" --replace " " --regex --recursive
+```
+
+### Conditional Updates with Filtering
+Only process files matching specific criteria:
+```bash
+# Update only Beatles songs
+mudio music/ --operation enlist --fields genre --value "Rock" \
+  --filter "artist=Beatles" --recursive
+
+# Update only 1990s tracks
+mudio music/ --operation write --fields decade --value "90s" \
+  --filter-regex --filter "date=^199" --recursive
+```
+
+### Multi-Value Field Management
+```bash
+# Add genre without duplicates
+mudio . --operation enlist --fields genre --value "Electronic" --recursive
+
+# Remove unwanted artist credit
+mudio . --operation delist --fields artist --value "Unknown Artist" --recursive
+```
+
+### Parallel Processing Control
+```bash
+# Use 8 threads for large library
+mudio /music --operation write --fields albumartist --value "Various" --threads 8 --recursive
+
+# Sequential processing for network shares
+mudio /nas/music --operation enlist --fields genre --value "Jazz" --threads 1 --recursive
 ```
 
 ## Version Compatibility
@@ -240,7 +230,7 @@ mudio . --operation find-replace --fields title --find "_" --replace " "
 ## Performance Considerations
 
 *   **Parallel Processing**: Enabled by default. Uses one thread per CPU core.
-    *   **Recommendation**: Use `--no-parallel` when processing files on a network share (NAS) or purely mechanical HDD to avoid thrashing.
+    *   **Recommendation**: Use `--threads 1` when processing files on a network share (NAS) or purely mechanical HDD to avoid thrashing.
 *   **Memory Usage**: `mudio` processes files in streams where possible, but loading large directories recursively consumes memory proportional to the file count.
 *   **Backups**: Creating backups doubles the disk I/O. For maximum speed on strictly safe data, verify backups are off (default is on-demand).
 

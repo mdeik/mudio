@@ -65,6 +65,36 @@ class TestOperations:
         op_comment = append('comment', ' [Live]')
         assert op_comment(['C1', 'C2']) == ['C1 [Live]', 'C2 [Live]']
 
+    def test_op_append_genre_delimiter_variations(self):
+        """Test that genre append handles delimiter variations correctly."""
+        # All variations should produce the same result due to normalization
+        initial = ['Pop', 'Rock']
+        expected = ['Pop', 'Rock', 'R&B']
+        
+        # Plain value without delimiter
+        op1 = append('genre', 'R&B')
+        assert op1(initial) == expected
+        
+        # Leading delimiter (creates empty string that gets stripped)
+        op2 = append('genre', ';R&B')
+        assert op2(initial) == expected
+        
+        # Leading delimiter with space (whitespace gets stripped)
+        op3 = append('genre', '; R&B')
+        assert op3(initial) == expected
+        
+        # Leading and trailing delimiters (empty strings stripped)
+        op4 = append('genre', '; R&B; ')
+        assert op4(initial) == expected
+        
+        # Verify deduplication works (case-insensitive)
+        op5 = append('genre', 'pop')
+        assert op5(initial) == ['Pop', 'Rock']  # 'pop' not added (duplicate)
+        
+        # Edge case: multiple delimiters, spaces, and trailing whitespace
+        op6 = append('genre', ';;; ; ;Alternative; Indie  ')
+        assert op6(initial) == ['Pop', 'Rock', 'Alternative', 'Indie']
+
     def test_op_prefix(self):
         # Single valued: prepend
         op = prefix('title', 'Prefix ')

@@ -9,7 +9,7 @@ from .core import SimpleMusic
 from .utils import safe_regex_pattern
 
 # ---------- Type Definitions ----------
-FieldOperationsType = Dict[str, Callable[[List[str]], List[str]]]
+FieldOperationsType = Callable[[List[str]], List[str]]
 FieldValuesType = Dict[str, List[str]]
 FilterType = Tuple[str, str, bool]
 
@@ -54,27 +54,6 @@ class FieldOperations:
 def find_replace(field_name: str, find: str, replace: str, regex: bool = False, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create a find/replace operation that substitutes text patterns in field values.
-    
-    Args:
-        field_name: Name of the field being operated on
-        find: Pattern to search for (literal string or regex)
-        replace: Replacement text
-        regex: If True, treat 'find' as a regular expression
-        delimiter: Delimiter for splitting multi-valued fields after replacement
-    
-    Returns:
-        Operation function that transforms List[str] -> List[str]
-    
-    Examples:
-        Replace literal text:
-        >>> op = find_replace('title', 'Demo', 'Final')
-        >>> op(['Demo Track']) 
-        ['Final Track']
-        
-        Regex replacement:
-        >>> op = find_replace('title', r'\\d+', 'X', regex=True)
-        >>> op(['Track 01'])
-        ['Track X']
     """
     pattern = re.compile(safe_regex_pattern(find, regex))
     
@@ -91,30 +70,12 @@ def find_replace(field_name: str, find: str, replace: str, regex: bool = False, 
         
         return FieldOperations.normalize_values(field_name, out)
     
+    op.field_name = field_name
     return op
 
 def write(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create a write operation that creates or overwrites the field with the given value(s).
-    
-    Args:
-        field_name: Name of the field being operated on
-        value_str: New value(s) to set (delimited for multi-valued fields)
-        delimiter: Delimiter for parsing multi-valued fields
-    
-    Returns:
-        Operation function that ignores current values and sets new ones
-    
-    Examples:
-        Set single value:
-        >>> op = write('title', 'New Title')
-        >>> op(['Old Title'])
-        ['New Title']
-        
-        Set multiple artists:
-        >>> op = write('artist', 'Artist A;Artist B', delimiter=';')
-        >>> op(['Old Artist'])
-        ['Artist A', 'Artist B']
     """
     if FieldOperations.is_multi_valued(field_name) or field_name == 'comment':
         vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
@@ -124,35 +85,12 @@ def write(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[Li
     def op(values: List[str]) -> List[str]:
         return FieldOperations.normalize_values(field_name, vals)
     
+    op.field_name = field_name
     return op
 
 def append(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create an append operation that adds text to existing field values.
-    
-    Behavior varies by field type:
-    - Single-valued: Appends to the first value
-    - Multi-valued: Adds as new value if not present
-    - Comment: Appends to each value
-    
-    Args:
-        field_name: Name of the field being operated on
-        value_str: Text to append (or values to add for multi-valued fields)
-        delimiter: Delimiter for parsing multi-valued additions
-    
-    Returns:
-        Operation function that appends/adds values
-    
-    Examples:
-        Append to title:
-        >>> op = append('title', ' (Remastered)')
-        >>> op(['Original'])
-        ['Original (Remastered)']
-        
-        Add genre:
-        >>> op = append('genre', 'Electronic')
-        >>> op(['Rock'])
-        ['Rock', 'Electronic']
     """
     def op(values: List[str]) -> List[str]:
         if not values:
@@ -174,34 +112,12 @@ def append(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[L
         
         return FieldOperations.normalize_values(field_name, new_values)
     
+    op.field_name = field_name
     return op
 
 def prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str]]:
     """
     Create a prefix operation that prepends text to field values.
-    
-    Behavior varies by field type:
-    - Single-valued: Prepends to the first value
-    - Multi-valued: Prepends to all values
-    - Comment: Prepends to each value
-    
-    Args:
-        field_name: Name of the field being operated on
-        value_str: Text to prepend
-    
-    Returns:
-        Operation function that prepends text to values
-    
-    Examples:
-        Prefix title:
-        >>> op = prefix('title', 'The ')
-        >>> op(['Song'])
-        ['The Song']
-        
-        Prefix all artists:
-        >>> op = prefix('artist', 'DJ ')
-        >>> op(['John', 'Jane'])
-        ['DJ John', 'DJ Jane']
     """
     def op(values: List[str]) -> List[str]:
         if not values:
@@ -219,36 +135,16 @@ def prefix(field_name: str, value_str: str) -> Callable[[List[str]], List[str]]:
         
         return FieldOperations.normalize_values(field_name, new_values)
     
+    op.field_name = field_name
     return op
 
 def enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create an enlist operation for multi-valued fields (warns/converts for single-valued).
-    
-    Similar to append but specifically designed for multi-valued fields like artist, genre.
-    For single-valued fields, behaves like append.
-    
-    Args:
-        field_name: Name of the field being operated on
-        value_str: Value(s) to enlist (delimited for multiple)
-        delimiter: Delimiter for parsing multiple values
-    
-    Returns:
-        Operation function that adds unique values to multi-valued fields
-    
-    Examples:
-        Enlist artists (no duplicates):
-        >>> op = enlist('artist', 'New Artist')
-        >>> op(['Existing Artist', 'Another'])
-        ['Existing Artist', 'Another', 'New Artist']
-        
-        Enlist multiple genres:
-        >>> op = enlist('genre', 'Rock;Metal', delimiter=';')
-        >>> op(['Electronic'])
-        ['Electronic', 'Rock', 'Metal']
     """
     def op(values: List[str]) -> List[str]:
         if not FieldOperations.is_multi_valued(field_name):
+            # Reuse append logic but attach field_name to the wrapper
             return append(field_name, value_str, delimiter=delimiter)(values)
         
         new_values = list(values)
@@ -261,63 +157,32 @@ def enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[L
         
         return FieldOperations.normalize_values(field_name, new_values)
     
+    op.field_name = field_name
     return op
 
 def clear(field_name: str) -> Callable[[List[str]], List[str]]:
     """
     Create a clear operation that sets field to empty string.
-    
-    Different from delete - clear leaves the field present but empty,
-    while delete removes the field entirely.
-    
-    Returns:
-        Operation function that returns [''] (empty but present)
-    
-    Example:
-        >>> op = clear('comment')
-        >>> op(['Old comment'])
-        ['']
     """
     def op(values: List[str]) -> List[str]:
         return [""]
+    
+    op.field_name = field_name
     return op
 
 def delete(field_name: str) -> Callable[[List[str]], List[str]]:
     """
     Create a delete operation that removes the field entirely.
-    
-    Different from clear - delete removes the field from metadata,
-    while clear leaves it present but empty.
-    
-    Returns:
-        Operation function that returns [] (field removed)
-    
-    Example:
-        >>> op = delete('comment')
-        >>> op(['Any value'])
-        []
     """
     def op(values: List[str]) -> List[str]:
         return []
+    
+    op.field_name = field_name
     return op
 
 def delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[List[str]], List[str]]:
     """
     Create a delist operation that removes specific values from multi-valued fields.
-    
-    Args:
-        field_name: Name of the field being operated on
-        value_str: Value(s) to remove (delimited for multiple)
-        delimiter: Delimiter for parsing multiple values
-    
-    Returns:
-        Operation function that removes specified values
-    
-    Examples:
-        Remove an artist:
-        >>> op = delist('artist', 'Artist A')
-        >>> op(['Artist A', 'Artist B'])
-        ['Artist B']
     """
     def op(values: List[str]) -> List[str]:
         if not values:
@@ -332,50 +197,78 @@ def delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[L
                 
         return FieldOperations.normalize_values(field_name, new_values)
     
+    op.field_name = field_name
     return op
 
 # ---------- Compute & Verify ----------
 def compute_new_fields(orig_fields: FieldValuesType, 
-                      field_ops: FieldOperationsType, 
-                      targeted_fields: List[str]) -> Tuple[FieldValuesType, Dict[str, bool]]:
+                      ops: List[FieldOperationsType]) -> Tuple[FieldValuesType, Dict[str, bool]]:
     """
-    Compute new field values with change tracking.
-    
-    Applies operations to fields and tracks which fields actually changed.
+    Compute new field values by applying a list of operations sequentially.
     
     Args:
         orig_fields: Original field values (field_name -> List[str])
-        field_ops: Operations to apply (field_name -> operation function)
-        targeted_fields: Fields to process
+        ops: List of operation functions to apply. Each op must have a .field_name attribute.
     
     Returns:
         Tuple of (new_fields, changed_dict) where:
         - new_fields: Updated field values
         - changed_dict: Maps field_name -> bool indicating if it changed
-    
-    Example:
-        >>> orig = {'title': ['Old'], 'artist': ['John']}
-        >>> ops = {'title': write('title', 'New')}
-        >>> new, changed = compute_new_fields(orig, ops, ['title', 'artist'])
-        >>> changed
-        {'title': True, 'artist': False}
     """
-    new = orig_fields.copy()
+    new_fields = orig_fields.copy()
     changed = {}
     
-    for field in targeted_fields:
-        op = field_ops.get(field)
-        if not op:
-            changed[field] = False
+    # Pre-compute case-insensitive map of existing keys
+    orig_keys_lower = {k.lower(): k for k in orig_fields.keys()}
+    
+    for op in ops:
+        target_field = getattr(op, 'field_name', None)
+        if not target_field:
             continue
             
-        before = FieldOperations.normalize_values(field, orig_fields.get(field, []))
-        after = FieldOperations.normalize_values(field, op(before))
+        # Resolved field name (preserve case if new, use existing case if present)
+        # 1. Exact match
+        if target_field in new_fields:
+            actual_field = target_field
+        # 2. Case-insensitive match
+        elif target_field.lower() in orig_keys_lower:
+            actual_field = orig_keys_lower[target_field.lower()]
+        # 3. New field
+        else:
+            actual_field = target_field
+            # Add to lower map so subsequent ops find it
+            orig_keys_lower[actual_field.lower()] = actual_field
+            
+        before = FieldOperations.normalize_values(actual_field, new_fields.get(actual_field, []))
+        after = FieldOperations.normalize_values(actual_field, op(before))
         
-        new[field] = after
-        changed[field] = (before != after)
-    
-    return new, changed
+        # If deleted (empty list from delete op), remove key
+        # Note: clear op returns [""] so it keeps key
+        # delete op returns []
+        
+        # Check if it's a delete operation (ops returning empty list generally imply removal in this system
+        # unless it's just an empty value. But `delete` specifically returns []. 
+        # `write` with empty value returns [].
+        # Let's trust the return value. If it's empty and was present, it's effectively deleted/cleared.
+        # But `delete` is special because it should remove the key.
+        # `read_fields` usually doesn't return empty fields.
+        
+        # Logic: Update the field. If it changes from before, mark changed.
+        
+        if not after and isinstance(after, list):
+             # If result is empty list, remove field?
+             # SimpleMusic.write_fields handles empty lists by removing frames usually.
+             pass
+
+        new_fields[actual_field] = after
+        
+        # Track if changed (accumulative)
+        if actual_field not in changed:
+             changed[actual_field] = (before != after)
+        else:
+             changed[actual_field] = changed[actual_field] or (before != after)
+             
+    return new_fields, changed
 
 # ---------- Artist/AlbumArtist Matching ----------
 def artist_plain_match(pattern: str, artist: str) -> bool:

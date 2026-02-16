@@ -1,11 +1,15 @@
-"""Pytest configuration with auto-generated test files."""
+"""
+Pytest configuration and shared fixtures.
+"""
 
 import pytest
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TCON, TRCK
+
+# ---------- Constants ----------
 
 # Minimal valid audio file headers for testing
 AUDIO_HEADERS = {
@@ -38,6 +42,10 @@ TAGS = {
     "genre": "TestGenre",
     "tracknumber": "1",
 }
+
+AUDIO_DIR = Path(__file__).parent / "audio"
+
+# ---------- Helper Functions ----------
 
 def generate_audio(path: Path, ext: str):
     """Generate a real audio file using ffmpeg."""
@@ -79,6 +87,18 @@ def write_mp3_tags(path: Path):
     audio.tags.add(TCON(encoding=3, text=TAGS["genre"]))
     audio.tags.add(TRCK(encoding=3, text=TAGS["tracknumber"]))
     audio.save(v2_version=3)
+
+def _get_audio_files():
+    """Helper to get list of real audio files for parametrization."""
+    from mudio.core import SimpleMusic
+    if not AUDIO_DIR.exists():
+        return []
+    return [
+        f for f in AUDIO_DIR.iterdir() 
+        if f.is_file() and f.suffix.lower() in SimpleMusic.SUPPORTED_EXT
+    ]
+
+# ---------- Fixtures ----------
 
 @pytest.fixture(scope="session")
 def audio_assets(tmp_path_factory):
@@ -122,9 +142,6 @@ def all_format_files(audio_assets):
     
     return audio_assets
 
-
-# Add these to tests/conftest.py
-
 @pytest.fixture
 def temp_audio_dir(tmp_path):
     """Create a temporary directory with dummy audio files."""
@@ -150,7 +167,6 @@ def temp_audio_dir(tmp_path):
 
     return audio_dir
 
-
 @pytest.fixture
 def small_batch_files(tmp_path):
     """Create a small number of files (< MIN_FILES_FOR_PARALLEL)."""
@@ -161,3 +177,17 @@ def small_batch_files(tmp_path):
             b'ID3\x03\x00\x00\x00\x00\x0F' b'TIT2\x00\x00\x00\x03\x00\x00\x00HI' b'\xFF\xFB\x90\x00\x00\x00\x00\x00')
         files.append(f)
     return files
+
+@pytest.fixture(params=_get_audio_files())
+def audio_file(request, tmp_path):
+    """
+    Parametrized fixture that yields a copy of each real audio file in tests/audio.
+    Usage: simple include 'audio_file' in test arguments.
+    """
+    original_file = request.param
+    # Create a source directory to avoid backup collision issues
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(exist_ok=True)
+    temp_file = source_dir / original_file.name
+    shutil.copy2(original_file, temp_file)
+    return temp_file

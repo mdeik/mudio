@@ -37,6 +37,7 @@ class Config:
 
     DEFAULT_SCHEMA = 'extended'
     DEFAULT_NAMESPACE = 'com.apple.iTunes'
+    DEFAULT_VERBOSE = False
     
     @classmethod
     def validate(cls) -> None:
@@ -55,6 +56,8 @@ class Config:
             raise ValueError(f"Invalid DEFAULT_SCHEMA: {cls.DEFAULT_SCHEMA}")
         if not cls.DEFAULT_NAMESPACE:
             raise ValueError("DEFAULT_NAMESPACE cannot be empty")
+        if not isinstance(cls.DEFAULT_VERBOSE, bool):
+            raise ValueError("DEFAULT_VERBOSE must be a boolean")
     
     @classmethod
     def load_from_env(cls) -> None:
@@ -71,6 +74,9 @@ class Config:
             cls.DEFAULT_SCHEMA = os.getenv('MUDIO_SCHEMA')
         if os.getenv('MUDIO_NAMESPACE'):
             cls.DEFAULT_NAMESPACE = os.getenv('MUDIO_NAMESPACE')
+        if os.getenv('MUDIO_VERBOSE'):
+            verbose_val = os.getenv('MUDIO_VERBOSE').lower()
+            cls.DEFAULT_VERBOSE = verbose_val in ('1', 'true', 'yes')
         cls.validate()
 
 # Thread-safe output helpers

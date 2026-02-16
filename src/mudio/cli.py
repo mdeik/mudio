@@ -108,11 +108,6 @@ def main() -> None:
             default=None,
             help="Number of threads for parallel processing (default: auto)"
         )
-        parser.add_argument(
-            "--no-parallel", 
-            action='store_true',
-            help="Disable parallel processing (force sequential)"
-        )
         
         # Field operations
         parser.add_argument("--fields", help="Comma-separated fields")
@@ -146,23 +141,34 @@ def main() -> None:
 
         
         # Logging
-        parser.add_argument("--verbose", action='store_true', help="Enable verbose logging")
+        parser.add_argument("--verbose", action='store_true', default=None,
+                           help="Enable verbose logging (overrides MUDIO_VERBOSE env var)")
         
         # Schema options
         parser.add_argument("--schema", choices=['canonical', 'extended', 'raw'], 
                            help="Metadata schema to use (overrides default/env var)")
+        parser.add_argument("--namespace", 
+                           help="Namespace for custom MP4 fields (overrides MUDIO_NAMESPACE env var)")
         
         # Deprecated: --extended-fields, --canonical-fields, --raw-fields are removed.
         # Use --schema instead.
         
         args = parser.parse_args()
         
-        # Setup logging
+        # Setup logging - use env var default if flag not explicitly set
+        if args.verbose is None:
+            # Config hasn't loaded yet, so we check directly here
+            verbose_env = os.getenv('MUDIO_VERBOSE', '').lower()
+            args.verbose = verbose_env in ('1', 'true', 'yes')
+        
         setup_logging(args.verbose)
         
         # Validate configuration
         try:
             Config.load_from_env()
+            # Override namespace if provided via CLI (takes precedence over env var)
+            if args.namespace:
+                Config.DEFAULT_NAMESPACE = args.namespace
             Config.validate()
         except ValueError as e:
             logger.error(f"Configuration validation failed: {e}")
@@ -219,19 +225,19 @@ def main() -> None:
         # Ensure signal handlers are unregistered on exit
         unregister_signal_handlers()
 
-def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperationsType, List[str]]:
+def build_operations_from_args(args: argparse.Namespace) -> Tuple[List[FieldOperationsType], List[str]]:
     """Build operations from command line arguments."""
     targeted_fields = []
-    ops = {}
+    ops = []
     
     if args.operation == 'purge':
         targeted_fields = CANONICAL_FIELDS.copy()
-        ops = {f: clear(f) for f in targeted_fields}
+        ops = [clear(f) for f in targeted_fields]
         return ops, targeted_fields
     
     if args.operation == 'print':
         # Print operation logic handled separately in main/print_file_result
-        return {}, []
+        return [], []
     
     # helper to get delimiter
     delimiter = getattr(args, 'delimiter', ';')
@@ -247,48 +253,38 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[FieldOperation
     targeted_fields = list(set(targeted_fields)) # Deduplicate
     
     # 3. Create operations for explicitly targeted fields
-    # 3. Create operations for explicitly targeted fields
     if args.operation == 'write':
         # Apply value to other targeted fields in write operation
         if args.value and targeted_fields:
              for field in targeted_fields:
-                 if field not in ops:
-                     ops[field] = write(field, args.value, delimiter=delimiter)
+                 ops.append(write(field, args.value, delimiter=delimiter))
 
     elif args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'delist', 'clear', 'delete'):
         for field in targeted_fields:
             if args.operation == 'find-replace':
-                ops[field] = find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter)
+                ops.append(find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter))
             # write operation removed, functionality merged into set
             elif args.operation == 'append':
-                ops[field] = append(field, args.value, delimiter=delimiter)
+                ops.append(append(field, args.value, delimiter=delimiter))
             elif args.operation == 'prefix':
-                ops[field] = prefix(field, args.value)
+                ops.append(prefix(field, args.value))
             elif args.operation == 'enlist':
-                ops[field] = enlist(field, args.value, delimiter=delimiter)
+                ops.append(enlist(field, args.value, delimiter=delimiter))
             elif args.operation == 'delist':
-                ops[field] = delist(field, args.value, delimiter=delimiter)
+                ops.append(delist(field, args.value, delimiter=delimiter))
             elif args.operation == 'clear':
-                ops[field] = clear(field)
+                ops.append(clear(field))
             elif args.operation == 'delete':
-                ops[field] = delete(field)
+                ops.append(delete(field))
 
     return ops, targeted_fields
 
 def parse_field_list(fields_str: str) -> List[str]:
-    """Parse comma-separated field list and normalize to canonical names."""
-    # Mapping for kebab-case to snake_case/canonical
-    normalization = {
-        'album-artist': 'albumartist',
-        'total-tracks': 'totaltracks',
-        'total-discs': 'totaldiscs',
-        'album_artist': 'albumartist',
-        'total_tracks': 'totaltracks',
-        'total_discs': 'totaldiscs'
-    }
+    """Parse comma-separated field list and normalize to canonical names using CANON aliases."""
+    from .core import canon_key
     
-    fields = [f.strip().lower() for f in fields_str.split(',')]
-    return [normalization.get(f, f) for f in fields]
+    fields = [f.strip() for f in fields_str.split(',') if f.strip()]
+    return [canon_key(f) for f in fields]
 
 def parse_filters(args: argparse.Namespace) -> List[FilterType]:
     """Parse filter expressions."""
@@ -327,15 +323,14 @@ def parse_filter_expression(expr: str) -> Tuple[str, str]:
     elif field.endswith('s') and field[:-1] in ('artist', 'albumartist'):
         field = field[:-1]
     
-    valid_fields = ('title', 'artist', 'artists', 'album', 'albumartist', 
-                   'albumartists', 'genre', 'comment', 'composer', 'performer')
+    valid_fields = CANONICAL_FIELDS.copy()
     
     if field not in valid_fields:
         raise ValueError(f"invalid filter field: {field}. Must be one of: {', '.join(valid_fields)}")
     
     return field, pattern
 
-def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType, 
+def run_processing_session(args: argparse.Namespace, ops: List[FieldOperationsType], 
                           targeted_fields: List[str], filters: List[FilterType]) -> int:
     """Process files using the parallel processor. Returns exit code."""
     # Build extension set
@@ -351,6 +346,9 @@ def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType,
     
     if not files:
         print("No files found matching criteria.")
+        # Still create JSON report if requested (with empty results)
+        if args.json_report:
+            save_json_report([], args.json_report)
         return EXIT_CODE_NO_FILES
     
     print(f"Processing {len(files)} file(s)...", flush=True)
@@ -359,9 +357,7 @@ def run_processing_session(args: argparse.Namespace, ops: FieldOperationsType,
     results = process_files(
         files,
         ops,
-        targeted_fields,
         max_workers=args.threads or 0,
-        use_parallel=not args.no_parallel,
         filters=filters,
         dry_run=args.dry_run,
         backup_dir=args.backup,
@@ -528,7 +524,7 @@ def generate_summary(results: List[ProcessResultType], per_ext: Dict[str, List[b
             status = "ALL PASSED" if passed_count == total_count else f"{passed_count}/{total_count} passed"
             print(f"  {ext or 'no ext'}: {status}")
     
-    # Save JSON report
+    # Save JSON report (always create, even if no files)
     if args.json_report:
         save_json_report(results, args.json_report)
 
@@ -540,11 +536,73 @@ def generate_summary(results: List[ProcessResultType], per_ext: Dict[str, List[b
             
     return EXIT_CODE_SUCCESS
 
-def save_json_report(data: Any, report_path: str) -> None:
-    """Save data as JSON report."""
+def save_json_report(results: List[ProcessResultType], report_path: str) -> None:
+    """Save processing results in documented JSON schema format."""
+    from datetime import datetime
+    
+    # Calculate summary statistics
+    total = len(results)
+    success = sum(1 for r in results if r.get('passed', False))
+    failed = sum(1 for r in results if r.get('error'))
+    skipped = sum(1 for r in results if r.get('skipped'))
+    
+    # Count backups
+    backups_created = 0
+    backups_removed = 0
+    for r in results:
+        if r.get('backup_path'):
+            backups_created += 1
+            if r.get('backup_kept') == False:
+                backups_removed += 1
+    
+    # Build schema-compliant structure
+    report_data = {
+        "version": "1.0",
+        "timestamp": datetime.now().isoformat(),
+        "summary": {
+            "total": total,
+            "success": success,
+            "failed": failed,
+            "skipped": skipped,
+            "backups_created": backups_created,
+            "backups_removed": backups_removed
+        },
+        "files": []
+    }
+    
+    # Transform results to documented format
+    for r in results:
+        file_record = {
+            "path": r.get('path', ''),
+            "status": "skipped" if r.get('skipped') else ("error" if r.get('error') else "success")
+        }
+        
+        # Add changes if present
+        if r.get('original') and r.get('planned'):
+            changes = {}
+            for field in r.get('changed', {}).keys():
+                if r['changed'][field]:  # Only include actually changed fields
+                    changes[field] = {
+                        "old": r['original'].get(field, []),
+                        "new": r['planned'].get(field, [])
+                    }
+            if changes:
+                file_record["changes"] = changes
+        
+        # Add error if present
+        if r.get('error'):
+            file_record["error"] = r['error']
+        
+        # Add backup info if present
+        if r.get('backup_path'):
+            file_record["backup_path"] = r['backup_path']
+            file_record["backup_kept"] = r.get('backup_kept', True)
+        
+        report_data["files"].append(file_record)
+    
     try:
         with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+            json.dump(report_data, f, ensure_ascii=False, indent=2, default=str)
         print(f"JSON report written to {report_path}")
     except Exception as e:
         print(f"Failed to write JSON report: {e}", file=sys.stderr)
