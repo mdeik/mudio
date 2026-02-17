@@ -6,7 +6,7 @@ import os
 import sys
 import re
 import logging
-import hashlib
+import xxhash
 from pathlib import Path
 from typing import List, Any
 from logging.handlers import RotatingFileHandler
@@ -143,7 +143,7 @@ def safe_regex_pattern(pattern: str, is_regex: bool = False) -> str:
 
 def get_file_hash(file_path: Path) -> str:
     """Calculate file hash for verification."""
-    hasher = hashlib.sha256()
+    hasher = xxhash.xxh64()
     with open(file_path, 'rb') as f:
         for chunk in iter(lambda: f.read(Config.CHUNK_SIZE), b""):
             hasher.update(chunk)

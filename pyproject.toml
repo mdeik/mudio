@@ -1,6 +1,6 @@
 [project]
 name = "mudio"
-version = "3.1.0"
+version = "3.2.0"
 description = "Friendly command-line music-metadata editor and Python library"
 authors = [{name = "Matthew Deik", email = "131482791+mdeik@users.noreply.github.com"}]
 license = {text = "MIT"}
@@ -8,6 +8,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "mutagen>=1.47.0",
+    "xxhash>=3.2.0",
 ]
 
 [project.optional-dependencies]

@@ -144,7 +144,7 @@ class TestAudioFeatures:
             fields = sm.read_fields(schema='extended')
             assert 'mytag' in fields
             # Merged content
-            assert sorted(fields['mytag']) == sorted(['a', 'b', 'a', 'b'])
+            assert sorted(fields['mytag']) == sorted(['a', 'b'])
 
 
     def test_unknown_keys_passthrough(self, audio_file):

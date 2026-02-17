@@ -25,8 +25,8 @@ These options apply to all operations.
 | `--delete-backups` | Delete backup files if operation is successful (default: kept). |
 | `--force` | Force operations (e.g. overwrite existing backups). |
 | `--json-report FILE` | Write a detailed processing report to a JSON file. |
-| `--delimiter CHAR` | Delimiter for splitting multi-value fields (default: `;`). |
-| `--schema SCHEMA` | Metadata schema: `canonical`, `extended` (default), or `raw`. |
+| `--delimiter CHAR(S)` | Delimiter(s) for splitting multi-value fields. Default: `;`. Supports multiple: `--delimiter ";,/"` splits on any. |
+| `--schema SCHEMA` | Metadata schema: `canonical`, `extended`, or `raw`. Default: `extended` (or configured via `MUDIO_SCHEMA`). |
 | `--namespace NS` | Namespace for custom MP4 fields (env: `MUDIO_NAMESPACE`). Default: `com.apple.iTunes`. |
 
 ---
@@ -59,9 +59,8 @@ Select an operation using `--operation NAME`.
 - Primary operation for setting tags
 
 **`append` / `prefix`**
-- **Single-valued** fields (title, album): Appends/prepends directly to string
-  - Note: `append` adds text as-is (no space added automatically)
-- **Multi-valued** fields (artist, genre): Applies to all values
+- Appends/prepends text to all values in the field
+- Note: `append` adds text as-is (no space added automatically)
 
 **`find-replace`**
 - Add `--regex` flag to use regex patterns
@@ -69,7 +68,7 @@ Select an operation using `--operation NAME`.
 
 **`enlist` / `delist`**
 - Case-insensitive matching
-- Only for multi-valued fields (artist, genre, albumartist, composer, performer)
+- Adds/removes values from the field's value list
 
 ---
 
@@ -85,24 +84,25 @@ These are the canonical field names supported across all audio formats.
 | Field | Description |
 | :--- | :--- |
 | `title` | Track title |
-| `artist` | Track artist (Multi-value) |
+| `artist` | Track artist |
 | `album` | Album name |
-| `albumartist` | Album artist (Multi-value) |
-| `genre` | Genre (Multi-value) |
+| `albumartist` | Album artist |
+| `genre` | Genre |
 | `date` | Release date/year |
 | `comment` | Comments |
 | `track` | Track number |
 | `totaltracks` | Total tracks count |
 | `disc` | Disc number |
 | `totaldiscs` | Total discs count |
-| `composer` | Composer (Multi-value) |
-| `performer` | Performer (Multi-value) |
+| `composer` | Composer |
+| `performer` | Performer |
 
 ### Custom Fields
 
 You are not limited to the canonical fields above. You can read and write **any** custom field supported by the underlying format.
 
 *   **Usage**: Simply use the field name in `--fields` (e.g. `--fields MY_CUSTOM_TAG`).
+*   **Multi-Value**: Custom fields are treated as multi-valued, like all other fields.
 *   **Storage**:
     *   **MP3 (ID3)**: `TXXX:MY_CUSTOM_TAG`
     *   **FLAC/Vorbis**: `MY_CUSTOM_TAG=Value`

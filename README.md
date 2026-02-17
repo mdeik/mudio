@@ -105,30 +105,23 @@ python your_script.py
 
 ### Field Handling (All Formats)
 
-`mudio` normalizes metadata to a **case-insensitive canonical schema** and applies consistent frame/value rules across formats.
+`mudio` normalizes metadata to a **case-insensitive canonical schema** and applies consistent rules across formats.
 
 #### Reading
 
-* **Canonical fields**: Tags that differ only by case or alias are merged via alias mapping (e.g., `GENRE`, `genre`, `tcon` → `genre`).
-* **Custom fields**: Unrecognized (non-canonical) keys are normalized to **small snake case** (`[a-z0-9_]`). Non-alphanumeric characters are replaced with `_`. Alternative casings are merged (e.g., `MyField`, `my-field` → `my_field`).
-* **Frame-level deduplication**: If multiple frames for a field contain the *same ordered list of values* (after normalization), only the first is kept.
-* **Intra-frame duplicates**: Duplicates *within* a single frame are preserved.
-* **Distinct frames**: Frames with different value sequences are preserved and flattened in first-seen order.
-
-**Example - Custom Field Reading:**
-```python
-# File has tags: "MyCustomField", "my-custom-field", "MYCUSTOMFIELD"
-# All merge to a single key on read
-fields = sm.read_fields(schema='extended')
-# Result: {'my_custom_field': ['value1', 'value2', 'value3'], ...}
-```
+* **Canonical fields**: Tags are normalized to standard names (e.g., `TIT2` → `title`).
+* **Strict whitespace handling**: All values are stripped of leading/trailing whitespace. Empty or whitespace-only values are dropped.
+* **Empty field representation**: If a field exists but all values are empty after stripping, it returns `['']` (a list with a single empty string).
+* **Deduplication**: All field values are deduplicated case-insensitively, and identical frames are merged.
 
 #### Writing
 
-* **Canonical fields**: Input keys are normalized via alias mapping and merged before write. Each canonical field is written once to its format-specific native tag (e.g., ID3 `TIT2`, MP4 `©nam`, Vorbis `TITLE`). Aliases are not written.
-* **Custom fields**: Keys are sanitized to **caps snake case** (`[A-Z0-9_]`). Non-alphanumeric characters are replaced with `_`.
-* **Value collapse**: All values for a field are emitted according to the target format's conventions, without duplicating equivalent aliases.
-* **Deterministic output**: Ordering reflects first occurrence after merge and deduplication.
+* **Canonical fields**: Written to format-specific native tags.
+* **Strict whitespace handling**: Values are stripped; empty strings are dropped from lists.
+* **Smart empty**: A single `['']` (e.g. from `clear()`) is preserved and written, allowing explicit "empty" tags.
+* **Deletion**: Writing `[]` (empty list) deletes the field entirely.
+* **All fields are multi-valued**: All unique values are written.
+* **Custom fields**: Keys are sanitized to caps snake case (e.g., `MY_CUSTOM_FIELD`).
 
 **Example - Custom Field Writing:**
 ```python
@@ -136,33 +129,16 @@ fields = sm.read_fields(schema='extended')
 sm.write_fields({
     'my-custom-field': ['value1'],  # Written as: MY_CUSTOM_FIELD
     'AnotherField': ['value2'],      # Written as: ANOTHERFIELD
-    'some.special!key': ['value3']   # Written as: SOME_SPECIAL_KEY
 })
 ```
 
-This ensures consistent behavior across file types while preventing casing/alias duplicates.
+### Canonical Fields
 
-### Canonical Fields Reference
+The following canonical fields are recognized by `mudio` across all audio formats:
 
-The following canonical fields are recognized by `mudio`. All aliases (including case variations) map to the canonical field name:
+`title` · `artist` · `album` · `albumartist` · `genre` · `comment` · `composer` · `performer` · `date` · `track` · `totaltracks` · `disc` · `totaldiscs`
 
-| Canonical Field | Recognized Aliases |
-|----------------|-------------------|
-| `title` | `title`, `tit2` |
-| `artist` | `artist`, `tpe1` |
-| `album` | `album`, `talb` |
-| `albumartist` | `albumartist`, `album_artist`, `tpe2`, `aart` |
-| `genre` | `genre`, `tcon` |
-| `comment` | `comment`, `comm` |
-| `composer` | `composer`, `tcom` |
-| `performer` | `performer`, `performers`, `perf`, `tpe3` |
-| `date` | `date`, `year`, `originaldate`, `tdrc`, `tory`, `tdat` |
-| `track` | `track`, `tracknumber`, `trck` |
-| `totaltracks` | `totaltracks`, `tracktotal` |
-| `disc` | `disc`, `discnumber`, `tpos` |
-| `totaldiscs` | `totaldiscs`, `disctotal` |
-
-**Note**: All comparisons are case-insensitive. For example, `TITLE`, `Title`, and `title` all map to `title`.
+**Note**: All field names are case-insensitive. Common variations (e.g., `album_artist`, `tracknumber`, `discnumber`) are automatically mapped to their canonical form.
 
 ## Comparison with Alternatives
 

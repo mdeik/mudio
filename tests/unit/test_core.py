@@ -71,7 +71,7 @@ class TestSimpleMusic(unittest.TestCase):
         
         sm = SimpleMusic(test_file)
         fields = sm.read_fields(schema='canonical')
-        self.assertEqual(fields['comment'], ['a', 'b', 'b', 'c'])
+        self.assertEqual(fields['comment'], ['a', 'b', 'c'])
         
         # EX 2: Identical frames deduplicated
         reset_tags()
@@ -104,10 +104,9 @@ class TestSimpleMusic(unittest.TestCase):
         
         sm = SimpleMusic(test_file)
         fields = sm.read_fields(schema='canonical')
-        # Expect 2 comments: 'A' and 'a'
-        self.assertEqual(len(fields['comment']), 2)
-        self.assertIn('A', fields['comment'])
-        self.assertIn('a', fields['comment'])
+        # Expect 1 comment: 'A' (case-insensitive dedup)
+        self.assertEqual(len(fields['comment']), 1)
+        self.assertEqual(fields['comment'], ['A'])
         
         # EX 5: Whitespace/Empty handling
         reset_tags()
@@ -123,11 +122,9 @@ class TestSimpleMusic(unittest.TestCase):
         # Let's see current behavior. If we don't stripe, they are distinct.
         # Expect 3 comments: ' ', '', '  '
         # Mutagen or ID3 implementation appears to drop empty COMM frames.
-        # Expect 2 comments: ' ' and '  ' (empty '' is dropped)
-        self.assertEqual(len(fields['comment']), 2)
-        self.assertNotIn('', fields['comment'])
-        self.assertIn(' ', fields['comment'])
-        self.assertIn('  ', fields['comment'])
+        # Strict read drops whitespace -> [""]
+        # ' ' and '  ' -> stripped -> empty -> [""]
+        self.assertEqual(fields.get('comment'), [""])
         
         # EX 6: Complex Descriptions (Duplicate content across different descriptions)
         reset_tags()

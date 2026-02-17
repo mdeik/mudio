@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List, Tuple, Any, Optional, Callable
+from typing import Dict, List, Tuple
 
 from .processor import register_signal_handlers, unregister_signal_handlers
 
@@ -16,7 +16,6 @@ from .utils import (
     Config, 
     setup_logging, 
     join_for_printing, 
-    print_progress_safe, 
     EXIT_CODE_SUCCESS, 
     EXIT_CODE_ERROR, 
     EXIT_CODE_USAGE, 
@@ -41,9 +40,7 @@ from .operations import (
 )
 from .processor import (
     ProcessResultType,
-    process_file,
     process_files,
-    verify_written,
     collect_files_generator
 )
 
@@ -54,7 +51,6 @@ def validate_args(args: argparse.Namespace) -> None:
     """Validate command line arguments comprehensively."""
     errors = []
     
-    # Validate mode and required parameters
     # Validate operation and required parameters
     if args.operation in ('find-replace', 'append', 'prefix', 'enlist', 'write', 'clear', 'delete', 'delist', 'purge'):
         if args.operation == 'find-replace' and (args.find is None or args.replace is None):
@@ -150,9 +146,6 @@ def main() -> None:
         parser.add_argument("--namespace", 
                            help="Namespace for custom MP4 fields (overrides MUDIO_NAMESPACE env var)")
         
-        # Deprecated: --extended-fields, --canonical-fields, --raw-fields are removed.
-        # Use --schema instead.
-        
         args = parser.parse_args()
         
         # Setup logging - use env var default if flag not explicitly set
@@ -163,7 +156,7 @@ def main() -> None:
         
         setup_logging(args.verbose)
         
-        # Validate configuration
+        # Configuration precedence: CLI flag > environment variable > default
         try:
             Config.load_from_env()
             # Override namespace if provided via CLI (takes precedence over env var)
@@ -187,7 +180,7 @@ def main() -> None:
         
         # Handle test mode
         if args.run_tests:
-            # Import here to avoid circular dependencies if any, and because it's rarely used
+            # Import here to avoid circular dependency
             from .tests_integration import run_tests_on_dir, handle_test_mode_output
             handle_test_mode_output(args)
             return
@@ -231,6 +224,7 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[List[FieldOper
     ops = []
     
     if args.operation == 'purge':
+        # Purge clears every canonical field at once (a convenience shortcut)
         targeted_fields = CANONICAL_FIELDS.copy()
         ops = [clear(f) for f in targeted_fields]
         return ops, targeted_fields
@@ -247,8 +241,7 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[List[FieldOper
         requested = parse_field_list(args.fields)
         targeted_fields.extend(requested)
     
-    # 2. Handle canonical fields (Removed --canonical-fields flag)
-    # Schema selection is now handled via --schema and passed to processor
+    # 2. Handle canonical fields via --schema (passed to processor)
         
     targeted_fields = list(set(targeted_fields)) # Deduplicate
     
@@ -263,7 +256,7 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[List[FieldOper
         for field in targeted_fields:
             if args.operation == 'find-replace':
                 ops.append(find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter))
-            # write operation removed, functionality merged into set
+            # Set operation
             elif args.operation == 'append':
                 ops.append(append(field, args.value, delimiter=delimiter))
             elif args.operation == 'prefix':
@@ -341,7 +334,7 @@ def run_processing_session(args: argparse.Namespace, ops: List[FieldOperationsTy
             for e in args.ext.split(',')
         )
     
-    # Collect files
+    # Collect all matching audio files from the path (may be a single file or directory)
     files = list(collect_files_generator(Path(args.path), recursive=args.recursive, ext_set=ext_set))
     
     if not files:
@@ -353,7 +346,7 @@ def run_processing_session(args: argparse.Namespace, ops: List[FieldOperationsTy
     
     print(f"Processing {len(files)} file(s)...", flush=True)
     
-    # Process files using the parallel dispatcher
+    # Hand off to the smart dispatcher (auto-selects parallel vs sequential)
     results = process_files(
         files,
         ops,
@@ -423,7 +416,7 @@ def print_file_result(rec: ProcessResultType, args: argparse.Namespace) -> None:
         
         # Show final metadata
         try:
-            read_schema = args.schema or 'canonical' # Default for verification read
+            read_schema = args.schema or 'extended' # Default for verification read
                 
             with managed_simple_music(Path(rec['path'])) as sm:
                 final_fields = sm.read_fields(schema=read_schema)
@@ -445,13 +438,13 @@ def print_metadata(metadata: FieldValuesType, max_len: int = 150, raw_fields: bo
     """
     
     def format_val(val_list: List[str]) -> str:
+        """Format a value list for display, truncating if needed."""
         s = join_for_printing(val_list)
         if len(s) > max_len:
             return s[:max_len-3] + "..."
         return s
 
     if raw_fields:
-        # Map of key -> Display Name (from canonical list below)
         display_map = {
             'title': 'Title', 'artist': 'Artist', 'album': 'Album',
             'albumartist': 'Album Artist', 'genre': 'Genre', 'comment': 'Comment',

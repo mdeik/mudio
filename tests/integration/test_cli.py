@@ -79,7 +79,11 @@ class TestCLIIntegration:
             
         with SimpleMusic.managed(audio_file) as sm:
             fields = sm.read_fields()
-            assert not fields.get('album')
+            if 'silence' in str(audio_file):
+                 # Strict reading returns [""] for empty fields
+                 assert fields.get('album') == [""]
+            else:
+                 assert fields.get('album') == [""]
 
     def test_cli_find_replace(self, audio_file):
         """Test find-replace."""

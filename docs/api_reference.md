@@ -141,10 +141,12 @@ High-level API that combines file collection with batch processing. Automaticall
 - **filters** (List[FilterType], optional): Filter conditions
 - **dry_run** (bool): If `True`, show changes without writing. Default: `False`
 - **backup_dir** (Union[str, Path], optional): Directory for backups
+- **delete_backups** (bool): If `True`, deletes backups after successful operations. Default: `False`
 - **force** (bool): If `True`, allow potentially destructive operations. Default: `False`
 - **verbose** (bool): If `True`, show detailed progress. Default: `False`
 - **max_workers** (Optional[int]): Number of parallel workers. Default: `None` (auto-detect)
 - **verify** (bool): If `True`, verify writes by reading back. Default: `True`
+- **read_schema** (str, optional): Schema for reading metadata (`'canonical'`, `'extended'`, `'raw'`). Default: `None` (uses global config)
 
 **Returns:** Dict with keys:
 - `'processed'` (int): Total files processed
@@ -155,7 +157,7 @@ High-level API that combines file collection with batch processing. Automaticall
 
 **Example:**
 ```python
-from mudio.batch import process_batch
+from mudio.processor import process_batch
 from mudio.operations import find_replace
 
 # Batch replace text in all files under a directory
@@ -177,20 +179,20 @@ for r in result['results']:
 
 ### `write_fields()` - Convenience Function
 
-**`write_fields(path: Union[str, Path], fields: Dict[str, Union[str, List[str]]], **kwargs) -> Dict[str, Any]`**
+**`write_fields(path: Union[str, Path], fields: Dict[str, str], **kwargs) -> Dict[str, Any]`**
 
 Convenience function to set multiple fields at once. Automatically converts field dictionary into write operations and calls `process_batch()`.
 
 **Parameters:**
 - **path** (Union[str, Path]): Directory or file path to process
-- **fields** (Dict[str, Union[str, List[str]]]): Dictionary mapping field names to values
+- **fields** (Dict[str, str]): Dictionary mapping field names to values
 - **kwargs**: Additional arguments passed to `process_batch()` (e.g., `recursive`, `dry_run`, `backup_dir`)
 
 **Returns:** Same as `process_batch()`
 
 **Example:**
 ```python
-from mudio.batch import write_fields
+from mudio.processor import write_fields
 
 # Convenience function for setting canonical fields only
 result = write_fields(
@@ -207,7 +209,7 @@ print(f"Updated {result['successful']} files")
 ```
 
 > [!NOTE]
-> `write_fields()` only accepts canonical field names. For custom fields, use `process_batch()` with `write()` operations directly.
+> `write_fields()` accepts any fields (canonical or custom). It internally uses `write()` operations for all provided fields. For more complex logic (like appending or conditional writing), use `process_batch()` with explicit operations.
 
 ---
 
@@ -247,13 +249,13 @@ All operations return a transformation function: `Callable[[List[str]], List[str
 
 | Operation | Purpose | Example |
 |-----------|---------|---------|
-| **`write(field, value, delimiter=';')`** | Create/overwrite field | `write('album', 'Greatest Hits')` |
-| **`append(field, value, delimiter=';')`** | Add to existing value | `append('title', ' (Remastered)')` |
-| **`prefix(field, value)`** | Prepend to value(s) | `prefix('artist', 'DJ ')` |
-| **`find_replace(field, find, replace, regex=False, delimiter=';')`** | String substitution | `find_replace('title', r'\\d+', '#', regex=True)` |
-| **`enlist(field, value, delimiter=';')`** | Add item(s) to multi-valued field | `enlist('genre', 'Rock;Electronic')` |
-| **`delist(field, value, delimiter=';')`** | Remove item(s) from multi-valued field | `delist('genre', 'Pop')` |
-| **`clear(field)`** | Set field to empty string | `clear('comment')` |
+| **`write(field, value, delimiter=';', index=None)`** | Overwrite all items (or specific item at index) | `write('album', 'Hits', index=0)` |
+| **`append(field, value, delimiter=';', index=None)`** | Append to all items (or specific item at index) | `append('title', ' (v2)')` |
+| **`prefix(field, value, index=None)`** | Prepend to all items (or specific item at index) | `prefix('artist', 'The ')` |
+| **`find_replace(field, find, replace, regex=False, delimiter=';', index=None)`** | Substitute in all items (or specific item) | `find_replace('title', 'Demo', 'Final', index=0)` |
+| **`enlist(field, value, delimiter=';')`** | Add NEW item(s) to list | `enlist('genre', 'Rock;Pop')` |
+| **`delist(field, value, delimiter=';')`** | Remove item(s) from list | `delist('genre', 'Pop')` |
+| **`clear(field)`** | Set field to empty string (`['']`) | `clear('comment')` |
 | **`delete(field)`** | Remove field entirely | `delete('custom_field')` |
 
 **Combining Operations:**
@@ -267,15 +269,120 @@ ops = [
 ]
 ```
 
+---
+
+## Field Value Handling
+
+### Storage Format
+
+**All fields are stored as `Dict[str, List[str]]`** throughout mudio, even single-valued fields:
+
+```python
+fields = {
+    'title': ['My Song'],           # Single-valued, but still a list
+    'artist': ['John', 'Jane'],     # Multi-valued list
+    'album': ['Greatest Hits'],     # Single-valued, but still a list
+    'genre': ['Rock', 'Pop']        # Multi-valued list
+}
+```
+
+This uniform representation simplifies API usage and makes operations consistent across all field types.
+
+> [!NOTE]
+> **Value-Level Deduplication**: Duplicate values are automatically removed from **all fields** (case-insensitive, order-preserved). This ensures clean metadata even after multiple append/merge operations.
+
+### Whitespace & Empty Value Handling
+
+Mudio enforces **strict whitespace and empty value handling** during both reading and writing:
+
+**On Read (`read_fields`):**
+- All values are **stripped** of leading/trailing whitespace
+- Values that become empty after stripping are **dropped**
+- If all values for a field are dropped (or the field was empty), the field returns **`['']`** (a list containing a single empty string) rather than being omitted
+
+**On Write (`write_fields`):**
+- All values are stripped of whitespace
+- Empty strings are dropped from lists
+- A single explicit `['']` (e.g. from `clear()`) is **preserved** and written to the file — this is the "smart empty" behavior
+- Writing `[]` (empty list) **deletes** the field entirely
+
+```python
+with SimpleMusic.managed('song.mp3') as sm:
+    fields = sm.read_fields()
+    fields['title']    # ['My Song']  — normal value
+    fields['comment']  # ['']         — field exists but is empty
+```
+
 ### Field Types
 
-The `FieldOperations` class categorizes fields:
+All fields are treated as **multi-valued lists**. Operations apply to **all items** by default, and values are automatically deduplicated (case-insensitive, order-preserved).
 
-- **Single-valued**: `title`, `album`, `date`, `track`, `disc`, etc.
-  - Operations take only the first value
-- **Multi-valued**: `artist`, `genre`, `albumartist`, `performer`, `composer`
-  - Operations maintain full list, deduplicate case-insensitively
-- **Special**: `comment` - can be multi-valued but doesn't deduplicate
+
+### Deduplication
+
+Mudio applies **value-level deduplication** to all fields:
+
+- **Rule**: Case-insensitive comparison, order-preserved
+- **Scope**: All values from all frames are merged and deduped
+- **Outcome**: `['Rock', 'rock', 'Pop']` → `['Rock', 'Pop']`
+
+Additionally, **frame-level deduplication** removes identical frames on read:
+- `['Values']` (Frame A) + `['Values']` (Frame B) → `['Values']`
+- `['Val A']` + `['Val B']` → `['Val A', 'Val B']` (distinct frames kept)
+
+### Delimiter Handling
+
+The **semicolon (`;`)** is the default delimiter for parsing strings into multiple values.
+
+**Default delimiter:** `;` (customizable via `delimiter` parameter)
+
+> [!IMPORTANT]
+> Delimiter parsing is **only automatic in operations** (`write`, `append`, `enlist`, etc.). When using `SimpleMusic.write_fields()` directly, you must parse strings yourself using `SimpleMusic.parse_list_string()` or provide pre-parsed lists.
+
+**How it works:**
+```python
+# Writing multiple values with delimiter
+write('genre', 'Rock;Pop;Jazz')           # Creates ['Rock', 'Pop', 'Jazz']
+write('artist', 'John Doe; Jane Smith')   # Creates ['John Doe', 'Jane Smith']
+```
+
+**Multiple delimiters (via `SimpleMusic.parse_list_string` only):**
+
+Pass a **list of strings** to `parse_list_string()` to split on any of them:
+
+```python
+from mudio.core import SimpleMusic
+
+# Split on semicolons, slashes, or commas
+SimpleMusic.parse_list_string('Rock;Pop/Jazz,Blues', delimiter=[';', '/', ','])
+# → ['Rock', 'Pop', 'Jazz', 'Blues']
+```
+
+> [!NOTE]
+> Operation functions (`write`, `append`, `enlist`, etc.) accept a **single delimiter string** only. For multiple delimiters, use `SimpleMusic.parse_list_string()` directly with `SimpleMusic.write_fields()`.
+
+**Operations that use delimiters:**
+- `write(field, value, delimiter=';')` — parse value string into list
+- `append(field, value, delimiter=';')` — parse and add new values
+- `enlist(field, value, delimiter=';')` — parse and add if not present
+- `delist(field, value, delimiter=';')` — parse and remove matching values
+- `find_replace(field, find, replace, regex, delimiter=';')` — parse replacement results
+
+**Example:**
+```python
+from mudio.operations import enlist
+
+# Add multiple genres at once
+enlist('genre', 'Electronic;Ambient')     # Adds both if not present
+
+# With custom delimiter
+enlist('artist', 'John | Jane', delimiter='|')  # ['John', 'Jane']
+```
+
+**Delimiter rules:**
+- Whitespace around values is automatically stripped: `"A; B ; C"` → `['A', 'B', 'C']`
+- Empty values are dropped: `"A;;B"` → `['A', 'B']`
+- Whitespace-only values are dropped: `"A;  ;B"` → `['A', 'B']`
 
 ---
 
@@ -307,7 +414,7 @@ with SimpleMusic.managed("song.mp3") as sm:
 
 Opens an audio file for metadata access. Raises `FormatError` or `RuntimeError` on failure.
 
-**`read_fields(schema: str = 'extended') -> Dict[str, List[str]]`**
+**`read_fields(schema: Optional[str] = None) -> Dict[str, List[str]]`**
 
 Reads metadata from the file. Returns a dict where keys are field names and values are **lists of strings** (even for single-valued fields).
 
@@ -331,13 +438,22 @@ Reads metadata from the file. Returns a dict where keys are field names and valu
 
 Writes metadata to the file. Custom fields are written as format-specific tags. Fields not in the dict are **preserved**. To delete a field, pass an empty list: `[]`.
 
-**`SimpleMusic.managed(path)` (class method)**
+> [!NOTE]
+> `write_fields()` expects **pre-parsed lists**. It does NOT automatically parse delimiter-separated strings. Use `parse_list_string()` to convert strings like `"Rock;Pop;Jazz"` to `['Rock', 'Pop', 'Jazz']`, or use the operations API which handles this automatically.
+
+**`SimpleMusic.managed(path)` (static method, context manager)**
 
 Returns a context manager for safe file handling.
 
 **`SimpleMusic.parse_list_string(s, delimiter=';')` (static)**
 
-Utility to split delimited strings into lists.
+Utility to split delimited strings into lists. Use this when working with `SimpleMusic.write_fields()` directly:
+
+```python
+# Manual parsing required for SimpleMusic
+genres = SimpleMusic.parse_list_string('Rock;Pop;Jazz')
+sm.write_fields({'genre': genres})  # ['Rock', 'Pop', 'Jazz']
+```
 
 
 ---

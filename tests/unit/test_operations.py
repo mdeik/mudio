@@ -19,13 +19,15 @@ class TestFieldOperations:
     """Tests for FieldOperations class."""
 
     def test_normalize_values_single_valued(self):
-        """Test normalization for single-valued fields."""
-        # list -> single value
-        assert FieldOperations.normalize_values('title', ['A', 'B']) == ['A']
-        # empty -> empty
+        """Test normalization for fields previously considered single-valued."""
+        # list -> single value treated as list always
+        assert FieldOperations.normalize_values('title', ['A', 'B']) == ['A', 'B']
+        # empty -> empty string item [""] (changed from [])
         assert FieldOperations.normalize_values('title', []) == []
-        # empty strings -> empty
-        assert FieldOperations.normalize_values('title', ['', '   ']) == []
+        # empty strings -> dropped
+        assert FieldOperations.normalize_values('title', ['']) == []
+        # whitespace -> dropped
+        assert FieldOperations.normalize_values('title', ['   ']) == []
 
     def test_normalize_values_multi_valued(self):
         """Test normalization for multi-valued fields."""
@@ -35,9 +37,9 @@ class TestFieldOperations:
         assert FieldOperations.normalize_values('artist', ['B', 'A']) == ['B', 'A']
 
     def test_normalize_values_comment(self):
-        """Test normalization for comment field (special case)."""
-        # Comments should NOT be deduplicated
-        assert FieldOperations.normalize_values('comment', ['A', 'A']) == ['A', 'A']
+        """Test normalization for comment field."""
+        # Comments ARE now deduplicated
+        assert FieldOperations.normalize_values('comment', ['A', 'A']) == ['A']
 
 
 class TestOperations:
@@ -48,59 +50,60 @@ class TestOperations:
         assert op(['Old']) == ['New']
         assert op([]) == ['New']
         
-        # Test overwrite with empty value -> clear
+        # Test overwrite with empty value -> empty string item
         op_empty = write('title', '')
         assert op_empty(['Old']) == []
 
     def test_op_append(self):
-        # Single valued: concatenate
+        # Single item list: append to item
         op = append('title', ' Suffix')
         assert op(['Title']) == ['Title Suffix']
         
-        # Multi valued: add new item
-        op_multi = append('artist', 'New Artist')
-        assert op_multi(['Old Artist']) == ['Old Artist', 'New Artist']
+        # Multi item list: append to ALL items
+        op_multi = append('artist', ' [Remix]')
+        assert op_multi(['Old Artist']) == ['Old Artist [Remix]']
+        assert op_multi(['A', 'B']) == ['A [Remix]', 'B [Remix]']
         
         # Comment: append to EACH
         op_comment = append('comment', ' [Live]')
         assert op_comment(['C1', 'C2']) == ['C1 [Live]', 'C2 [Live]']
 
-    def test_op_append_genre_delimiter_variations(self):
-        """Test that genre append handles delimiter variations correctly."""
+    def test_op_enlist_genre_delimiter_variations(self):
+        """Test that genre enlist handles delimiter variations correctly."""
         # All variations should produce the same result due to normalization
         initial = ['Pop', 'Rock']
         expected = ['Pop', 'Rock', 'R&B']
         
         # Plain value without delimiter
-        op1 = append('genre', 'R&B')
+        op1 = enlist('genre', 'R&B')
         assert op1(initial) == expected
         
         # Leading delimiter (creates empty string that gets stripped)
-        op2 = append('genre', ';R&B')
+        op2 = enlist('genre', ';R&B')
         assert op2(initial) == expected
         
         # Leading delimiter with space (whitespace gets stripped)
-        op3 = append('genre', '; R&B')
+        op3 = enlist('genre', '; R&B')
         assert op3(initial) == expected
         
         # Leading and trailing delimiters (empty strings stripped)
-        op4 = append('genre', '; R&B; ')
+        op4 = enlist('genre', '; R&B; ')
         assert op4(initial) == expected
         
         # Verify deduplication works (case-insensitive)
-        op5 = append('genre', 'pop')
+        op5 = enlist('genre', 'pop')
         assert op5(initial) == ['Pop', 'Rock']  # 'pop' not added (duplicate)
         
         # Edge case: multiple delimiters, spaces, and trailing whitespace
-        op6 = append('genre', ';;; ; ;Alternative; Indie  ')
+        op6 = enlist('genre', ';;; ; ;Alternative; Indie  ')
         assert op6(initial) == ['Pop', 'Rock', 'Alternative', 'Indie']
 
     def test_op_prefix(self):
-        # Single valued: prepend
+        # Single item list: prepend to item
         op = prefix('title', 'Prefix ')
         assert op(['Title']) == ['Prefix Title']
         
-        # Multi valued: prepend to ALL
+        # Multi item list: prepend to ALL items
         op_multi = prefix('artist', 'The ')
         assert op_multi(['Beatles', 'Stones']) == ['The Beatles', 'The Stones']
 
@@ -110,9 +113,9 @@ class TestOperations:
         assert op(['Old']) == ['Old', 'New']
         assert op(['Old', 'New']) == ['Old', 'New'] # No dupe
         
-        # For single valued, behaves like append
-        op_single = enlist('title', ' New')
-        assert op_single(['Old']) == ['Old New']
+        # For fields previously single-valued, now behaves like multi-valued (adds item)
+        op_single = enlist('title', 'New')
+        assert op_single(['Old']) == ['Old', 'New']
 
     def test_op_delist(self):
         # Remove single value

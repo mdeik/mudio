@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from mudio.core import SimpleMusic, FormatError
 from mudio.processor import process_file
-from mudio.batch import process_batch
+from mudio.processor import process_batch
 from mudio.operations import write
 from mudio.utils import Config
 import time

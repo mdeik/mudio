@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from mudio.batch import process_batch, write_fields
+from mudio.processor import process_batch, write_fields
 from mudio.operations import write, append
 import tempfile
 import shutil
@@ -162,13 +162,15 @@ def test_write_fields_convenience_function(temp_audio_dir):
             assert r['planned'].get('title') == ['Set Title']
             assert r['planned'].get('artist') == ['Set Artist']
 
-def test_write_fields_invalid_field():
-    """Test write_fields with invalid field name."""
-    with pytest.raises(ValueError, match="Invalid field"):
-        write_fields(
-            ".",
-            fields={'invalid_field': 'value'}
-        )
+def test_write_fields_custom_field(temp_audio_dir):
+    """Test write_fields with custom field name (should be allowed)."""
+    # Should not raise ValueError
+    result = write_fields(
+        temp_audio_dir,
+        fields={'MY_CUSTOM_FIELD': 'value'},
+        dry_run=True
+    )
+    assert result['processed'] > 0
 
 def test_process_batch_verbose_logging(temp_audio_dir, caplog):
     """Test verbose logging output from processor module."""

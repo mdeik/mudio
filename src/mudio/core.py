@@ -1,7 +1,6 @@
 """
 SimpleMusic - Unified API for reading/writing music file metadata.
 Handles MP3(ID3), M4A(MP4), FLAC/Vorbis, WAV (ID3), etc.
-Now with automatic tag support for formats that support it.
 """
 
 import mutagen
@@ -23,10 +22,13 @@ from .utils import Config
 
 logger = logging.getLogger(__name__)
 
+# Audio formats this library can read and write metadata for
 SUPPORTED_EXT = {'.mp3', '.flac', '.m4a', '.mp4', '.ogg', '.opus', '.wav'}
 
-# Canonical mapping for case-insensitive normalization
-# Order matters: this defines the order of CANONICAL_FIELDS
+# Maps each canonical field name to all the aliases it can be referred to as.
+# Different formats use different tag names for the same concept
+# (e.g. "artist" is "TPE1" in MP3/ID3, "\xa9ART" in MP4, "Author" in WMA).
+# This mapping unifies them all under one name.
 CANON = {
     "title": {"title", "tit2"},
     "artist": {"artist", "artists", "tpe1"},
@@ -45,14 +47,14 @@ CANON = {
 
 CANONICAL_FIELDS = list(CANON.keys())
 
-# Pre-compute lookup table for O(1) access
+# Build a flat lookup table: any alias -> canonical name (for instant lookups)
+# e.g. _CANON_LOOKUP["tpe1"] = "artist", _CANON_LOOKUP["album_artist"] = "albumartist"
 _CANON_LOOKUP = {}
 for canon, aliases in CANON.items():
     _CANON_LOOKUP[canon] = canon
     for alias in aliases:
-        # Store alias as is
         _CANON_LOOKUP[alias] = canon
-        # Store alias with hyphens/spaces replaced by underscores
+        # Also handle hyphens/spaces as underscores
         normalized_alias = alias.replace('-', '_').replace(' ', '_')
         _CANON_LOOKUP[normalized_alias] = canon
 
@@ -70,13 +72,10 @@ def canon_key(k: str) -> str:
     """
     k_norm = k.strip().lower()
     
-    # Try direct lookup first (this will handle original aliases and canonical keys)
     if k_norm in _CANON_LOOKUP:
         return _CANON_LOOKUP[k_norm]
     
-    # If not found, try normalizing hyphens and spaces to underscores
-    # This step is now redundant because _CANON_LOOKUP already stores these variations.
-    # However, keeping it for robustness if _CANON_LOOKUP generation changes or for keys not in CANON.
+    # Try with hyphens and spaces normalized to underscores
     k_with_underscores = k_norm.replace('-', '_').replace(' ', '_')
     if k_with_underscores in _CANON_LOOKUP:
         return _CANON_LOOKUP[k_with_underscores]
@@ -109,9 +108,11 @@ class SimpleMusic:
     Unified API for reading and writing music file metadata across formats.
     Automatically adds tag support when writing to compatible formats.
     """
-    CANONICAL_FIELDS = CANONICAL_FIELDS
+
     SUPPORTED_EXT = SUPPORTED_EXT
+    
     def __init__(self, path: Union[str, Path]):
+        """Initialize SimpleMusic with the given audio file path."""
         self.path = Path(path)
         self.mfile = None
         self.load_file()
@@ -119,14 +120,11 @@ class SimpleMusic:
     def load_file(self) -> None:
         """Load the music file with mutagen and validate format."""
         try:
-            # Load with mutagen - let it handle file I/O errors
-
             self.mfile = mutagen.File(self.path, easy=False)
             if self.mfile is None:
                 raise FormatError("Unsupported file format or corrupted file")
                 
         except mutagen.MutagenError as e:
-            # When mutagen fails to parse, treat as unsupported format
             raise FormatError(f"Unsupported file format or corrupted file: {e}")
         except Exception as e:
             raise FormatError(f"Failed to load file {self.path}: {e}")
@@ -141,34 +139,39 @@ class SimpleMusic:
                 logger.warning(f"Error closing music file {self.path}: {e}")
     
     def __enter__(self) -> 'SimpleMusic':
+        """Enter the context manager."""
         return self
     
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit the context manager and close the file."""
         self.close()
     
     @staticmethod
-    def parse_list_string(s: Optional[str], delimiter: str = ';') -> List[str]:
+    def parse_list_string(s: Optional[str], delimiter: Union[str, List[str]] = ';') -> List[str]:
         """
-        Parse delimiter-separated string into list, stripping whitespace and empties.
+        Parse delimiter-separated string into list, usually stripping whitespace.
+        Supports single delimiter (str) or multiple delimiters (List[str]).
         
         Args:
             s: String to parse (None returns empty list)
-            delimiter: Separator character (default: ';')
+            delimiter: Separator(s). If list, splits on ANY of them.
         
         Returns:
-            List of non-empty strings
-        
-        Examples:
-            >>> SimpleMusic.parse_list_string('Rock; Pop ; Jazz')
-            ['Rock', 'Pop', 'Jazz']
-            >>> SimpleMusic.parse_list_string('')
-            []
-            >>> SimpleMusic.parse_list_string(None)
-            []
+            List of strings (stripped of whitespace, removing empties)
         """
         if s is None: 
             return []
-        parts = [p.strip() for p in str(s).split(delimiter)]
+        
+        # Handle multiple delimiters
+        if isinstance(delimiter, list):
+            # Create regex pattern for split: [;/,] etc.
+            # Escape delimiters to be safe
+            import re
+            pattern = '|'.join(map(re.escape, delimiter))
+            parts = [p.strip() for p in re.split(pattern, str(s))]
+        else:
+            parts = [p.strip() for p in str(s).split(delimiter)]
+            
         return [p for p in parts if p != ""]
     
     @staticmethod
@@ -176,27 +179,23 @@ class SimpleMusic:
         """
         Remove duplicates while preserving order (case-insensitive comparison).
         
-        Comparison is case-insensitive, but preserves original case of first occurrence.
-        
         Args:
             seq: List of strings to deduplicate
         
         Returns:
-            List with duplicates removed (order and case preserved)
-        
-        Examples:
-            >>> SimpleMusic.unique_preserve_order_case_insensitive(['Rock', 'Pop', 'ROCK', 'Jazz'])
-            ['Rock', 'Pop', 'Jazz']
-            >>> SimpleMusic.unique_preserve_order_case_insensitive(['a', 'A', 'b', 'B', 'a'])
-            ['a', 'b']
+            List with duplicates removed. 
+            NOTE: Does NOT automatically strip whitespace from output values. 
+            Caller should normalize values before passing if desired.
         """
         seen = set()
         out = []
         for x in seq:
-            key = str(x).strip().lower()
+            # Key for deduplication is stripped/lower
+            val_str = str(x)
+            key = val_str.strip().lower()
             if key not in seen:
                 seen.add(key)
-                out.append(str(x).strip())
+                out.append(val_str)
         return out
     
     @staticmethod
@@ -259,60 +258,71 @@ class SimpleMusic:
                   None (default) - use Config.DEFAULT_MODE.
         """
         if schema is None:
-            # New config class might not be imported yet if circular import risk,
-            # but standard import should work.
             from .utils import Config
             schema = Config.DEFAULT_SCHEMA
 
         if self.mfile is None or self.mfile.tags is None:
             return {k: [] for k in CANONICAL_FIELDS} if schema == 'canonical' else {}
 
-        # MP4 / M4A
-        if isinstance(self.mfile, mp4.MP4):
+        # Dispatch to format-specific reader based on file type.
+        # Each format stores tags differently, so we need specialized readers.
+        if isinstance(self.mfile, mp4.MP4):                    # MP4 / M4A
             fields = self._read_mp4_fields(self.mfile.tags, schema=schema)
-        
-        # ID3 (MP3/WAV with ID3v2 tags)
-        elif isinstance(self.mfile.tags, id3.ID3):
+        elif isinstance(self.mfile.tags, id3.ID3):             # ID3 (MP3 / WAV)
             fields = self._read_id3_fields(self.mfile.tags, schema=schema)
-        
-        # FLAC files
-        elif isinstance(self.mfile, flac.FLAC):
+        elif isinstance(self.mfile, flac.FLAC):                # FLAC
             fields = self._read_flac_fields(self.mfile.tags, schema=schema)
-        
-        # ASF/WMA
-        elif isinstance(self.mfile, asf.ASF):
+        elif isinstance(self.mfile, asf.ASF):                  # ASF / WMA
             fields = self._read_asf_fields(self.mfile.tags, schema=schema)
-        
-        # Other formats (Ogg, Opus, WMA, WV, etc.)
-        else:
+        else:                                                  # Ogg, Opus, etc.
             fields = self._read_easy_tags(self.mfile.tags, schema=schema)
         
-        # Apply sanitization if schema is canonical or extended
+        # Post-processing: clean up and standardize values for canonical/extended schemas
         if schema in ('canonical', 'extended'):
              sanitized_fields = {}
              for k, v in fields.items():
-                 # Canonical fields are already safe (and should be preserved as-is to match CANONICAL_FIELDS)
-                 if k in CANONICAL_FIELDS:
-                     clean_k = k
-                 else:
-                     clean_k = self._sanitize_read_key(k)
-                 
-                 if clean_k not in sanitized_fields:
-                     sanitized_fields[clean_k] = []
-                 sanitized_fields[clean_k].extend(v)
+                  vals_list = v if isinstance(v, list) else [v]
+                  
+                  # Strip whitespace and drop empty values
+                  cleaned_vals = []
+                  for x in vals_list:
+                      s = str(x).strip()
+                      if s:
+                          cleaned_vals.append(s)
+                  
+                  # If all values were empty, preserve [""] so the field still appears
+                  if not cleaned_vals:
+                      cleaned_vals = [""]
+                  
+                  # Sanitize non-canonical key names (e.g. "My-Custom Tag" -> "my_custom_tag")
+                  if k in CANONICAL_FIELDS:
+                      clean_k = k
+                  else:
+                      clean_k = self._sanitize_read_key(k)
+                  
+                  # Group values by key (multiple native keys may map to the same clean key)
+                  if clean_k not in sanitized_fields:
+                      sanitized_fields[clean_k] = []
+                  sanitized_fields[clean_k].append(cleaned_vals)
              
-             # Deduplicate values again after merge
-             for k in sanitized_fields:
-                 sanitized_fields[k] = self._deduplicate_frames([sanitized_fields[k]])
+             # Flatten grouped values and remove duplicates
+             final_fields = {}
+             for k, frames in sanitized_fields.items():
+                 all_vals = []
+                 for f in frames:
+                     all_vals.extend(f)
+                 final_fields[k] = self.unique_preserve_order_case_insensitive(all_vals)
                  
-             return sanitized_fields
+             return final_fields
 
         return fields
     
-    def _read_mp4_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_mp4_fields(self, tags: Any, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """Read fields from MP4/M4A files."""
+        if schema is None:
+            schema = Config.DEFAULT_SCHEMA
+
         if schema == 'raw':
-            # Just dump what we have, but decode bytes if possible
             out = {}
             for k, vals in tags.items():
                 val_list = vals if isinstance(vals, list) else [vals]
@@ -331,13 +341,14 @@ class SimpleMusic:
         collected = {k: [] for k in CANONICAL_FIELDS}
         
         def add_frame(key: str, vals: List[str]) -> None:
-             if vals:
-                 if key not in collected:
-                     collected[key] = []
-                 collected[key].append(vals)
+            """Adds a list of values as a frame to the collected fields."""
+            if vals:
+                if key not in collected:
+                    collected[key] = []
+                collected[key].append(vals)
         
         def get_vals(key: str) -> List[str]:
-            # Try to fetch by exact key
+            """Fetch tag values by exact key, decoding bytes to UTF-8."""
             vals = tags.get(key)
             if not vals: 
                 return []
@@ -353,6 +364,7 @@ class SimpleMusic:
                     outvals.append(str(v))
             return outvals
         
+        # MP4 uses special "atom" keys — the \xa9 prefix is the Apple copyright sign (©)
         add_frame('title', get_vals('\xa9nam'))
         add_frame('artist', get_vals('\xa9ART'))
         add_frame('album', get_vals('\xa9alb'))
@@ -372,7 +384,8 @@ class SimpleMusic:
              if perf_key in tags:
                 add_frame('performer', get_vals(perf_key))
         
-        # Track/disk tuples
+        # MP4 stores track/disc as tuples: (number, total)
+        # e.g. trkn = [(3, 12)] means "track 3 of 12"
         trkn = tags.get('trkn')
         if trkn and isinstance(trkn, list) and len(trkn) > 0:
             try:
@@ -385,7 +398,8 @@ class SimpleMusic:
                 logger.debug(f"Failed to parse MP4 track number: {e}")
                 pass
         
-        # Fallback: check for custom track/totaltracks fields if standard atom missed
+        # Fallback: some files store track/disc in custom freeform atoms
+        # (e.g. "----:com.apple.iTunes:track") instead of the standard tuple
         if not collected['track']:
             for k in [f'----:{Config.DEFAULT_NAMESPACE}:track', f'----:{Config.DEFAULT_NAMESPACE}:TRACK']:
                 val = get_vals(k)
@@ -428,15 +442,14 @@ class SimpleMusic:
                     break
                 
         if schema == 'extended':
-            # Add other atoms
-            # Mappped atom keys
+            # Include any non-standard atoms as custom fields
+            # Skip atoms we already handle above (and binary/system ones like cover art)
             mapped = {'\xa9nam', '\xa9ART', '\xa9alb', 'aART', '\xa9gen', 
                       '\xa9cmt', '\xa9day', '\xa9wrt', 'perf', '\xa9prf', 
                       'trkn', 'disk', 'covr', 'cpil', 'pgap', 'tmpo'}
             
             for k, vals in tags.items():
                 if k not in mapped and not k.startswith(f'----:{Config.DEFAULT_NAMESPACE}:PERFORMER'):
-                    # Handle parsing of unknown atoms similar to get_vals
                     outvals = []
                     if not vals: continue
                     for v in vals:
@@ -449,7 +462,8 @@ class SimpleMusic:
                         else:
                             outvals.append(str(v))
                     
-                    # Clean key
+                    # Strip the freeform atom prefix to get a human-readable key
+                    # e.g. "----:com.apple.iTunes:LYRICS" -> "LYRICS"
                     clean_key = k
                     if k.startswith(f'----:{Config.DEFAULT_NAMESPACE}:'):
                         clean_key = k[len(f'----:{Config.DEFAULT_NAMESPACE}:'):]
@@ -461,17 +475,20 @@ class SimpleMusic:
                     if outvals:
                          add_frame(c_key, outvals)
         
-        # Finalize: deduplicate frames
+        # Finalize: merge and deduplicate frames per field
+        # e.g. if two identical artist frames exist, keep only one
         out = {k: [] for k in CANONICAL_FIELDS}
         for k, frames in collected.items():
             out[k] = self._deduplicate_frames(frames)
             
         return out
     
-    def _read_id3_fields(self, tags: id3.ID3, schema: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_id3_fields(self, tags: id3.ID3, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """Read fields from ID3 files (MP3/WAV)."""
+        if schema is None:
+            schema = Config.DEFAULT_SCHEMA
+
         if schema == 'raw':
-            # Raw mode: dump all frames
             out = {}
             for key, frame in tags.items():
                 vals = []
@@ -489,12 +506,14 @@ class SimpleMusic:
         collected = {k: [] for k in CANONICAL_FIELDS}
         
         def add_frame(key: str, vals: List[str]) -> None:
-             if vals:
-                 if key not in collected:
-                     collected[key] = []
-                 collected[key].append(vals)
+            """Adds a list of values as a frame to the collected fields."""
+            if vals:
+                if key not in collected:
+                    collected[key] = []
+                collected[key].append(vals)
 
         def get_frame(frame_name: str) -> List[str]:
+            """Extract text values from a named ID3 frame."""
             frame = tags.get(frame_name)
             if not frame:
                 return []
@@ -506,7 +525,7 @@ class SimpleMusic:
         add_frame('albumartist', get_frame('TPE2'))
         add_frame('genre', get_frame('TCON'))
         
-        # Comments
+        # ID3 can have multiple comment frames (e.g. for different languages)
         comms = tags.getall('COMM')
         if comms:
             for c in comms:
@@ -515,11 +534,12 @@ class SimpleMusic:
         
         add_frame('composer', get_frame('TCOM'))
         
-        # Performer: include TPE3 and TXXX:PERFORMER
+        # Performer can be stored as TPE3 (standard) or TXXX:PERFORMER (custom)
         tpe3 = get_frame('TPE3')
         if tpe3:
             add_frame('performer', tpe3)
             
+        # TXXX frames are "user-defined text" — scan them for performer tags
         txxx_frames = tags.getall('TXXX')
         for tx in txxx_frames:
             try:
@@ -528,7 +548,6 @@ class SimpleMusic:
                     if hasattr(tx, 'text'):
                         add_frame('performer', [str(x) for x in getattr(tx, 'text', [])])
                 
-                # Extended schema: add TXXX frames that aren't performer
                 if schema == 'extended' and desc.lower() not in ('performer', 'performers', 'perf'):
                      c_key = canon_key(desc)
                      if hasattr(tx, 'text'):
@@ -542,7 +561,7 @@ class SimpleMusic:
         if out_date:
             add_frame('date', out_date)
         
-        # Track/position parsing
+        # ID3 stores track/disc as "N/Total" strings (e.g. "3/12")
         tr = get_frame('TRCK')
         if tr:
             parts = str(tr[0]).split('/')
@@ -559,8 +578,7 @@ class SimpleMusic:
             if len(parts) > 1 and parts[1].strip(): 
                 add_frame('totaldiscs', [parts[1].strip()])
                 
-        if schema == 'extended':
-            # Add other frames not covered by canonical
+            # Add non-canonical frames
             known_frames = {'TIT2', 'TPE1', 'TALB', 'TPE2', 'TCON', 'COMM', 'TCOM', 
                            'TPE3', 'TXXX', 'TDRC', 'TORY', 'TDAT', 'TRCK', 'TPOS'}
             for key, frame in tags.items():
@@ -591,21 +609,25 @@ class SimpleMusic:
                     
         return out
     
-    def _read_flac_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_flac_fields(self, tags: Any, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """Read fields from FLAC files."""
+        if schema is None:
+            schema = Config.DEFAULT_SCHEMA
+
         if schema == 'raw':
-            # Vorbis comments are practically a dict already
             return {k: [str(v) for v in vals] for k, vals in tags.items()}
 
         collected = {k: [] for k in CANONICAL_FIELDS}
         
         def add_frame(key: str, vals: List[str]) -> None:
-             if vals:
-                 if key not in collected:
-                     collected[key] = []
-                 collected[key].append(vals)
+            """Adds a list of values as a frame to the collected fields."""
+            if vals:
+                if key not in collected:
+                    collected[key] = []
+                collected[key].append(vals)
         
         def get_list(key: str, alt_keys: Optional[List[str]] = None) -> List[str]:
+            """Return tag values for key, trying alternative keys as fallback."""
             keys_to_try = [key]
             if alt_keys:
                 keys_to_try.extend(alt_keys)
@@ -677,22 +699,26 @@ class SimpleMusic:
                     
         return out
     
-    def _read_easy_tags(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
-        """Read fields from other formats (Ogg, Opus, WMA, WV, etc.)."""
+    def _read_easy_tags(self, tags: Any, schema: Optional[str] = None) -> Dict[str, List[str]]:
+        """Read fields from other formats (Ogg, Opus, etc.)."""
+        if schema is None:
+            schema = Config.DEFAULT_SCHEMA
+
         if schema == 'raw':
-            # Just dump what we have
             return {str(k): [str(v) for v in vals] if isinstance(vals, list) else [str(vals)] 
                     for k, vals in tags.items()}
 
         collected = {k: [] for k in CANONICAL_FIELDS}
         
         def add_frame(key: str, vals: List[str]) -> None:
-             if vals:
-                 if key not in collected:
-                     collected[key] = []
-                 collected[key].append(vals)
+            """Adds a list of values as a frame to the collected fields."""
+            if vals:
+                if key not in collected:
+                    collected[key] = []
+                collected[key].append(vals)
         
         def get_list(key: str, alt_keys: Optional[List[str]] = None) -> List[str]:
+            """Return tag values for key, trying alternative keys as fallback."""
             keys_to_try = [key]
             if alt_keys:
                 keys_to_try.extend(alt_keys)
@@ -766,8 +792,11 @@ class SimpleMusic:
             
         return out
     
-    def _read_asf_fields(self, tags: Any, schema: str = 'canonical') -> Dict[str, List[str]]:
+    def _read_asf_fields(self, tags: Any, schema: Optional[str] = None) -> Dict[str, List[str]]:
         """Read fields from ASF/WMA files."""
+        if schema is None:
+            schema = Config.DEFAULT_SCHEMA
+
         if schema == 'raw':
              return {str(k): [str(v.value) if hasattr(v, 'value') else str(v) for v in vals] 
                      for k, vals in tags.items()}
@@ -775,12 +804,14 @@ class SimpleMusic:
         collected = {k: [] for k in CANONICAL_FIELDS}
         
         def add_frame(key: str, vals: List[str]) -> None:
-             if vals:
-                 if key not in collected:
-                     collected[key] = []
-                 collected[key].append(vals)
+            """Adds a list of values as a frame to the collected fields."""
+            if vals:
+                if key not in collected:
+                    collected[key] = []
+                collected[key].append(vals)
         
         def get_vals(key: str) -> List[str]:
+            """Fetch ASF tag values by key, extracting .value attributes."""
             vals = tags.get(key)
             if not vals:
                 return []
@@ -799,7 +830,7 @@ class SimpleMusic:
         add_frame('copyrighted', get_vals('Copyright'))
         add_frame('encodedby', get_vals('WM/EncodingSettings'))
         
-        # Performer doesn't have a standard single frame in ASF, check both
+        
         add_frame('performer', get_vals('Performer'))
         add_frame('performer', get_vals('WM/Performer'))
             
@@ -846,37 +877,45 @@ class SimpleMusic:
         if self.mfile is None:
             raise RuntimeError("No file loaded")
         
-        # NEW: Ensure tags exist before attempting to write
         self._ensure_tags_exist()
         
-        # Normalize fields to canonical keys
+        # Normalize all keys to canonical form (e.g. "tpe1" -> "artist")
         canonical_fields = {}
         for k, v in fields.items():
             c_key = canon_key(k)
-            # Merge if multiple input keys map to same canonical key
+            # If multiple input keys map to the same canonical key, merge their values
+            # Clean values before merging
+            cleaned = []
+            vals = v if isinstance(v, list) else [v]
+            
+            # Handling empty values: strip whitespace and drop empties,
+            # UNLESS the caller explicitly passed [""] to signal "clear this field"
+            raw_stripped = [str(x).strip() for x in vals]
+            cleaned = [x for x in raw_stripped if x]
+            
+            if not cleaned and len(raw_stripped) == 1 and raw_stripped[0] == "":
+                 # Explicit clear intent (single empty string input)
+                 cleaned = [""]
+            
             if c_key in canonical_fields:
-                canonical_fields[c_key].extend(v)
+                canonical_fields[c_key].extend(cleaned)
             else:
-                canonical_fields[c_key] = list(v) # Copy list
+                canonical_fields[c_key] = cleaned
         
-        # Dedupe values
+        # Deduplicate values per field (case-insensitive)
         for k in canonical_fields:
             canonical_fields[k] = self.unique_preserve_order_case_insensitive(canonical_fields[k])
             
-        # MP4/M4A
-        if isinstance(self.mfile, mp4.MP4):
+        # Dispatch to format-specific writer (mirrors the reader dispatch above)
+        if isinstance(self.mfile, mp4.MP4):                            # MP4 / M4A
             self._write_mp4_fields(canonical_fields)
-        # ID3 (MP3 / WAV with ID3)
-        elif isinstance(self.mfile.tags, id3.ID3) or isinstance(self.mfile, wave.WAVE):
+        elif isinstance(self.mfile.tags, id3.ID3) or isinstance(self.mfile, wave.WAVE):  # ID3 (MP3 / WAV)
             self._write_id3_fields(canonical_fields)
-        # FLAC
-        elif isinstance(self.mfile, flac.FLAC):
+        elif isinstance(self.mfile, flac.FLAC):                        # FLAC
             self._write_flac_fields(canonical_fields)
-        # ASF/WMA
-        elif isinstance(self.mfile, asf.ASF):
+        elif isinstance(self.mfile, asf.ASF):                          # ASF / WMA
             self._write_asf_fields(canonical_fields)
-        # Other formats
-        else:
+        else:                                                          # Ogg, Opus, etc.
             self._write_easy_tags(canonical_fields)
     
     def _write_mp4_fields(self, fields: Dict[str, List[str]]) -> None:
@@ -887,6 +926,7 @@ class SimpleMusic:
             tags = self.mfile.tags
         
         def set_atom(key: str, vals: List[str]) -> None:
+            """Set or delete an MP4 atom by key."""
             if not vals:
                 try: 
                     del tags[key]
@@ -904,7 +944,8 @@ class SimpleMusic:
         set_atom('\xa9day', fields.get('date', []))
         set_atom('\xa9wrt', fields.get('composer', []))
         
-        # Performer: use iTunes freeform atom
+        # Performer: MP4 has no standard performer atom, so we use an iTunes freeform atom.
+        # Freeform atoms require raw UTF-8 bytes (not strings).
         performer_key = f'----:{Config.DEFAULT_NAMESPACE}:PERFORMER'
         if fields.get('performer'):
             try:
@@ -919,7 +960,8 @@ class SimpleMusic:
             except KeyError:
                 pass
         
-        # Track/disk tuples
+        # MP4 encodes track/disc as tuples: (number, total)
+        # e.g. tags['trkn'] = [(3, 12)] for "track 3 of 12"
         if fields.get('track') or fields.get('totaltracks'):
             tnum = self.safe_int(fields.get('track')[0]) if fields.get('track') else 0
             ttot = self.safe_int(fields.get('totaltracks')[0]) if fields.get('totaltracks') else 0
@@ -940,7 +982,8 @@ class SimpleMusic:
             except KeyError: 
                 pass
         
-        # Write custom/unknown fields as freeform atoms
+        # Any fields not in the standard set are written as freeform atoms
+        # (e.g. "----:com.apple.iTunes:LYRICS") which is the MP4 custom metadata convention
         known_fields = {
             'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
             'date', 'composer', 'performer', 'track', 'totaltracks', 'disc', 'totaldiscs'
@@ -954,7 +997,6 @@ class SimpleMusic:
                      atom_key = f"----:{Config.DEFAULT_NAMESPACE}:{clean_key}"
                      
                      # Remove existing keys with same name but different case
-                     # This ensures we overwrite mixed-case duplicates
                      keys_to_remove = [k for k in tags.keys() if k.lower() == atom_key.lower()]
                      for k in keys_to_remove:
                          del tags[k]
@@ -996,7 +1038,8 @@ class SimpleMusic:
         
         tags = self.mfile.tags
         
-        # Remove frames we manage (preserve TPE3 for performer)
+        # ID3 write strategy: delete all managed frames first, then re-add.
+        # This prevents stale data if a field is removed by the user.
         frames_to_remove = ['TIT2', 'TALB', 'TPE1', 'TPE2', 'TCON', 'COMM', 
                            'TDRC', 'TRCK', 'TPOS', 'TCOM']
         for frame in frames_to_remove:
@@ -1024,7 +1067,6 @@ class SimpleMusic:
         if fields.get('genre'):
             tags.add(id3.TCON(encoding=3, text=fields['genre']))
         if fields.get('comment'):
-            # Collapse multiple comments into a single frame as requested
             tags.add(id3.COMM(encoding=3, lang='eng', desc='', text=fields['comment']))
         if fields.get('composer'):
             tags.add(id3.TCOM(encoding=3, text=fields['composer']))
@@ -1040,7 +1082,7 @@ class SimpleMusic:
         if fields.get('date'):
             tags.add(id3.TDRC(encoding=3, text=fields['date']))
         
-        # TRCK / TPOS
+        # ID3 encodes track/disc as "N/Total" strings (e.g. "3/12")
         if fields.get('track') or fields.get('totaltracks'):
             tnum = fields.get('track')[0] if fields.get('track') else ''
             ttot = fields.get('totaltracks')[0] if fields.get('totaltracks') else ''
@@ -1053,7 +1095,7 @@ class SimpleMusic:
             tpos_text = f"{dnum}/{dtot}" if dtot else str(dnum)
             tags.add(id3.TPOS(encoding=3, text=[tpos_text]))
             
-        # Write custom/unknown fields as TXXX
+        # Any fields not in the standard set are written as TXXX (user-defined text) frames
         known_fields = {
             'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
             'composer', 'performer', 'date', 'track', 'totaltracks', 'disc', 'totaldiscs'
@@ -1061,7 +1103,6 @@ class SimpleMusic:
         
         for key, vals in fields.items():
             if key not in known_fields:
-                # Handle TXXX: prefix from extended read
                 search_key = key
                 if search_key.startswith('TXXX:'):
                     search_key = search_key[5:]
@@ -1090,6 +1131,7 @@ class SimpleMusic:
         tags = self.mfile.tags
         
         def set_or_del(key: str, vals: List[str]) -> None:
+            """Sets a FLAC tag with the given values or deletes it if values are empty."""
             if not vals:
                 try: 
                     del tags[key]
@@ -1121,6 +1163,7 @@ class SimpleMusic:
                 except KeyError: 
                     pass
                     
+            # Write totaltracks to both "tracktotal" and "totaltracks" for compatibility
             if ttot:
                 tags['tracktotal'] = str(ttot)
                 tags['totaltracks'] = str(ttot)
@@ -1162,7 +1205,7 @@ class SimpleMusic:
 
         self.mfile.save()
         
-        # Write custom/unknown fields
+        # Write custom fields
         known_fields = {
             'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
             'composer', 'performer', 'date', 'track', 'totaltracks', 'disc', 'totaldiscs'
@@ -1177,7 +1220,6 @@ class SimpleMusic:
                     except KeyError:
                         pass
                 else:
-                    # Mutagen handles list of strings automatically
                     tags[self._sanitize_custom_key(key)] = vals
                 
         self.mfile.save()
@@ -1190,6 +1232,7 @@ class SimpleMusic:
         tags = self.mfile.tags
         
         def set_or_del(key: str, vals: List[str]) -> None:
+            """Sets a tag with the given values or deletes it if values are empty."""
             if not vals:
                 try: 
                     del tags[key]
@@ -1240,7 +1283,7 @@ class SimpleMusic:
 
         self.mfile.save()
         
-        # Write custom/unknown fields
+        # Write custom fields
         known_fields = {
             'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
             'composer', 'performer', 'date', 'track', 'totaltracks', 'disc', 'totaldiscs'
@@ -1266,10 +1309,10 @@ class SimpleMusic:
         """Write fields to ASF/WMA files."""
         tags = self.mfile.tags
         if tags is None:
-             # Typically ASF tags are always present or created on load, but just in case
              pass
         
         def set_val(asf_key: str, vals: List[str], type_hint=None) -> None:
+            """Set or delete an ASF attribute by key."""
             if not vals:
                 try: 
                     del tags[asf_key]
@@ -1285,14 +1328,16 @@ class SimpleMusic:
                     new_attrs.append(asf.ASFUnicodeAttribute(str(v)))
                 tags[asf_key] = new_attrs
 
-        # Helper to clean legacy/conflicting custom keys
         def clean_legacy(keys_to_clean: List[str]):
+            """Remove legacy/conflicting custom tag keys."""
             for k in keys_to_clean:
                 try: del tags[k]
                 except KeyError: pass
 
+        # WMA uses its own native ASF attribute names (e.g. "Title", "Author")
+        # After writing, clean up any lowercase duplicates from other tag editors
         set_val('Title', fields.get('title', []))
-        clean_legacy(['title']) # Clean lowercase 'title' if present
+        clean_legacy(['title'])
 
         set_val('Author', fields.get('artist', []))
         clean_legacy(['artist', 'author']) # Clean lowercase 'artist'/'author'
@@ -1318,7 +1363,6 @@ class SimpleMusic:
         # Performer
         if fields.get('performer'):
              set_val('WM/Performer', fields.get('performer', []))
-             # Also write legacy 'Performer' if needed? sticking to WM/Performer is safer for Windows
         else:
              try: del tags['WM/Performer'] 
              except KeyError: pass
@@ -1326,9 +1370,6 @@ class SimpleMusic:
              except KeyError: pass
 
         # Track/Disc
-        # WM/TrackNumber is typically string in WMA tags seen in wild
-        # But specifically 0-based or 1-based? Usually 1-based.
-        # We will write what we have.
         if fields.get('track'):
              set_val('WM/TrackNumber', fields.get('track'))
         else:
@@ -1341,10 +1382,7 @@ class SimpleMusic:
              try: del tags['WM/PartOfSet']
              except KeyError: pass
         
-        # Write totaltracks/totaldiscs if present?
-        # No standard frame, maybe custom
-        
-        # Write custom fields defined in fields
+        # Custom fields
         known_fields = {
             'title', 'artist', 'album', 'albumartist', 'genre', 'comment', 
             'composer', 'performer', 'date', 'track', 'disc',
@@ -1400,7 +1438,7 @@ class SimpleMusic:
         
         tags = self.mfile.tags
         
-        # Format based on file type (similar to your print_fields logic)
+        # Format based on file type
         # MP4/M4A
         if isinstance(self.mfile, mp4.MP4):
             for key, values in sorted(tags.items()):
@@ -1486,7 +1524,6 @@ class SimpleMusic:
                 except Exception as close_error:
                     logger.warning(f"Error during cleanup of {path}: {close_error}")
 
-# Keep test class as before
 class SimpleMusicTests(unittest.TestCase):
     """Unit tests for SimpleMusic class."""
     

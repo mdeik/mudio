@@ -42,8 +42,8 @@ class TestUtils:
             tmp.close()
             path = Path(tmp.name)
             try:
-                # sha256 of "content"
-                expected = "ed7002b439e9ac845f22357d822bac1444730fbdb6016d3ec9432297b9ec9f73"
+                # xxhash of "content"
+                expected = "6c5b191a31c5a9fc"
                 assert get_file_hash(path) == expected
             finally:
                 path.unlink()
