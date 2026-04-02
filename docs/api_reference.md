@@ -288,6 +288,17 @@ fields = {
 
 This uniform representation simplifies API usage and makes operations consistent across all field types.
 
+### Single-Value vs Multi-Value Fields
+
+While all fields are represented as lists in memory, mudio distinguishes between **single-value** and **multi-value** fields when parsing operations and writing to disk:
+
+- **Single-Value (Default)**: All fields unless specified otherwise (including all **custom fields**).
+    - **Delimiter Ignoring**: Operations on these fields (like `write`, `enlist`) treat the input string as a single literal value and do NOT split it by semicolons. This allows titles like `"Whatcha;Whatcha Doin'"` to be preserved.
+    - **Index 0 Persistence**: Only the first item in the list (`index 0`) is written to the audio file. Any additional items added to the list in memory will be lost upon saving.
+- **Multi-Value Fields**: `artist`, `albumartist`, `composer`, `genre`, `performer`, and `comment`.
+    - **Delimiter Splitting**: Operations automatically split input strings by the delimiter (default `;`) into multiple list items.
+    - **Full Persistence**: All items in the list are written to the file (supported formats like FLAC, MP4, and ID3v2.4 handle multiple values natively).
+
 > [!NOTE]
 > **Value-Level Deduplication**: Duplicate values are automatically removed from **all fields** (case-insensitive, order-preserved). This ensures clean metadata even after multiple append/merge operations.
 

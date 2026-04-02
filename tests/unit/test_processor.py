@@ -395,7 +395,7 @@ class TestProcessFile:
         # 1. Initial change
         res1 = process_file(
             str(audio_template),
-            ops=[write("album", "Test Album")],
+            ops=[write("album", "New Album Name")],
         )
         assert res1['passed'] is True
         assert res1['wrote'] is True
@@ -403,7 +403,7 @@ class TestProcessFile:
         # 2. Apply SAME change
         res2 = process_file(
             str(audio_template),
-            ops=[write("album", "Test Album")],
+            ops=[write("album", "New Album Name")],
         )
         assert res2['passed'] is True
         assert res2['wrote'] is False
@@ -484,9 +484,23 @@ class TestProcessFile:
              read_val = fields['title'][0]
              # We assume it wrote at least the start
              assert "Start" in read_val 
-             # We just want to ensure it didn't crash and saved *something* reasonable or exact.
              # If it saved exactly "Start\x00End", that's fine too.
              pass
+
+    def test_process_file_disk_full(self, audio_template):
+        """Test handling of ENOSPC (Disk Full) during write."""
+        import errno
+        # Mocking writing to the file to raise ENOSPC
+        with patch('mudio.core.SimpleMusic.write_fields') as mock_write:
+             mock_write.side_effect = OSError(errno.ENOSPC, "No space left")
+             
+             result = process_file(
+                 str(audio_template),
+                 ops=[write("title", "Disk Full Test")]
+             )
+             
+             assert result['passed'] is False
+             assert "No space left" in result['error']
 
 
 class TestVerifyWritten:
@@ -674,6 +688,33 @@ class TestParallelProcessing:
             mock_parallel.assert_not_called()
             # It returns results in sequential mode
             assert len(results) == len(files)
+
+    def test_process_files_parallel_error_recovery(self):
+        """Test parallel processing handles exceptions in individual tasks."""
+        files = [Path("f1.mp3"), Path("f2.mp3"), Path("f3.mp3")]
+        
+        # Mock process_file to fail for one file
+        def side_effect(path, *args, **kwargs):
+            if "f2" in str(path):
+                return {"path": str(path), "passed": False, "error": "Simulated failure"}
+            return {"path": str(path), "passed": True}
+            
+        with patch('mudio.processor.process_file', side_effect=side_effect):
+            results = _process_files_parallel(
+                files,
+                ops=[],
+                max_workers=2
+            )
+            
+            assert len(results) == 3
+            # Check the failure was captured
+            f2_res = next(r for r in results if "f2" in r['path'])
+            assert f2_res['passed'] is False
+            assert f2_res['error'] == "Simulated failure"
+            
+            # Others should have passed
+            f1_res = next(r for r in results if "f1" in r['path'])
+            assert f1_res['passed'] is True
 
 
 class TestSignalHandlers:

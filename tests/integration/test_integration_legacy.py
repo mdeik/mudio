@@ -8,16 +8,16 @@ import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional, Callable
 
-from .core import managed_simple_music, SUPPORTED_EXT
-from .processor import process_file, safe_file_copy
-from .operations import (
-    overwrite, 
+from mudio.core import managed_simple_music, SUPPORTED_EXT
+from mudio.processor import process_file, safe_file_copy, verify_written
+from mudio.operations import (
+    write, 
     find_replace, 
     append, 
     clear,
     FieldOperationsType
 )
-from .cli import verify_written
+import pytest
 
 # ---------- Test Suite ----------
 def set_baseline(fpath: Path, baseline_fields: Dict[str, List[str]]) -> None:
@@ -182,7 +182,21 @@ def create_test_definitions() -> List[Tuple]:
         ['comment'],
         {},
         lambda: {'comment': ['Some comment']},
-        lambda f: not f.get('comment')
+        lambda f: not f.get('comment') or f.get('comment') == ['']
+    ))
+
+    # Merge check (Partial write)
+    # This specifically tests if writing a new field preserves existing canonical fields
+    tests.append((
+        'merge_check', 'overwrite',
+        ['composer'],
+        {'value_composer': 'New Composer'},
+        lambda: {'title': ['Original Title'], 'artist': ['Original Artist']},
+        lambda f: (
+            f.get('composer') == ['New Composer'] and
+            f.get('title') == ['Original Title'] and
+            f.get('artist') == ['Original Artist']
+        )
     ))
 
     return tests
@@ -197,7 +211,7 @@ def build_operations_for_test(mode: str, fields_list: List[str], params: Dict[st
         for field in fields_list:
             param_key = f'value_{field}' if field in ['title', 'album', 'artist', 'albumartist', 'genre', 'comment', 'composer', 'performer'] else field
             if param_key in params:
-                ops.append(overwrite(field, params[param_key]))
+                ops.append(write(field, params[param_key]))
                 target.append(field)
     
     elif mode == 'find-replace':
@@ -299,3 +313,20 @@ def handle_test_mode_output(args: argparse.Namespace) -> None:
     # Save JSON report if requested
     if args.json_report:
         save_json_report(res, args.json_report)
+
+def test_legacy_integration_suite(tmp_path):
+    """Run the legacy integration test suite using pytest."""
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    AUDIO_DIR = base_dir / "tests" / "audio"
+    if not AUDIO_DIR.exists():
+        pytest.skip(f"Audio assets directory {AUDIO_DIR} not found.")
+    
+    test_results = run_tests_on_dir(str(AUDIO_DIR), test_dir=str(tmp_path / "legacy_tests"))
+    
+    if "error" in test_results:
+        pytest.fail(f"Legacy test suite failed: {test_results['error']}")
+    
+    # Check that tests actually passed
+    for file_path, results in test_results['per_file'].items():
+        for test_name, ok, note in results:
+            assert ok, f"Test {test_name} failed for {file_path}: {note}"

@@ -46,6 +46,9 @@ CANON = {
 }
 
 CANONICAL_FIELDS = list(CANON.keys())
+MULTI_VALUE_FIELDS = {
+    "artist", "albumartist", "composer", "genre", "performer", "comment"
+}
 
 # Build a flat lookup table: any alias -> canonical name (for instant lookups)
 # e.g. _CANON_LOOKUP["tpe1"] = "artist", _CANON_LOOKUP["album_artist"] = "albumartist"
@@ -906,6 +909,11 @@ class SimpleMusic:
         for k in canonical_fields:
             canonical_fields[k] = self.unique_preserve_order_case_insensitive(canonical_fields[k])
             
+            # Multi-value field determination: explicit allowed list is multi-value,
+            # everything else (including custom fields) is single-value by default.
+            if k not in MULTI_VALUE_FIELDS and len(canonical_fields[k]) > 1:
+                canonical_fields[k] = [canonical_fields[k][0]]
+            
         # Dispatch to format-specific writer (mirrors the reader dispatch above)
         if isinstance(self.mfile, mp4.MP4):                            # MP4 / M4A
             self._write_mp4_fields(canonical_fields)
@@ -935,52 +943,51 @@ class SimpleMusic:
             else:
                 tags[key] = [str(x) for x in vals]
         
-        set_atom('\xa9nam', fields.get('title', []))
-        set_atom('\xa9ART', fields.get('artist', []))
-        set_atom('\xa9alb', fields.get('album', []))
-        set_atom('aART', fields.get('albumartist', []))
-        set_atom('\xa9gen', fields.get('genre', []))
-        set_atom('\xa9cmt', fields.get('comment', []))
-        set_atom('\xa9day', fields.get('date', []))
-        set_atom('\xa9wrt', fields.get('composer', []))
+        if 'title' in fields:
+            set_atom('\xa9nam', fields['title'])
+        if 'artist' in fields:
+            set_atom('\xa9ART', fields['artist'])
+        if 'album' in fields:
+            set_atom('\xa9alb', fields['album'])
+        if 'albumartist' in fields:
+            set_atom('aART', fields['albumartist'])
+        if 'genre' in fields:
+            set_atom('\xa9gen', fields['genre'])
+        if 'comment' in fields:
+            set_atom('\xa9cmt', fields['comment'])
+        if 'date' in fields:
+            set_atom('\xa9day', fields[ 'date'])
+        if 'composer' in fields:
+            set_atom('\xa9wrt', fields['composer'])
         
         # Performer: MP4 has no standard performer atom, so we use an iTunes freeform atom.
         # Freeform atoms require raw UTF-8 bytes (not strings).
         performer_key = f'----:{Config.DEFAULT_NAMESPACE}:PERFORMER'
-        if fields.get('performer'):
-            try:
-                raw_vals = [str(v).encode('utf-8') for v in fields['performer']]
-                tags[performer_key] = raw_vals
-            except Exception as e:
-                logger.warning(f"Failed to write MP4 performer field: {e}")
-                pass
-        else:
-            try:
-                del tags[performer_key]
-            except KeyError:
-                pass
+        if 'performer' in fields:
+            if fields['performer']:
+                try:
+                    raw_vals = [str(v).encode('utf-8') for v in fields['performer']]
+                    tags[performer_key] = raw_vals
+                except Exception as e:
+                    logger.warning(f"Failed to write MP4 performer field: {e}")
+                    pass
+            else:
+                try:
+                    del tags[performer_key]
+                except KeyError:
+                    pass
         
         # MP4 encodes track/disc as tuples: (number, total)
         # e.g. tags['trkn'] = [(3, 12)] for "track 3 of 12"
-        if fields.get('track') or fields.get('totaltracks'):
+        if 'track' in fields or 'totaltracks' in fields:
             tnum = self.safe_int(fields.get('track')[0]) if fields.get('track') else 0
             ttot = self.safe_int(fields.get('totaltracks')[0]) if fields.get('totaltracks') else 0
             tags['trkn'] = [(tnum or 0, ttot or 0)]
-        else:
-            try: 
-                del tags['trkn']
-            except KeyError: 
-                pass
         
-        if fields.get('disc') or fields.get('totaldiscs'):
+        if 'disc' in fields or 'totaldiscs' in fields:
             dnum = self.safe_int(fields.get('disc')[0]) if fields.get('disc') else 0
             dtot = self.safe_int(fields.get('totaldiscs')[0]) if fields.get('totaldiscs') else 0
             tags['disk'] = [(dnum or 0, dtot or 0)]
-        else:
-            try: 
-                del tags['disk']
-            except KeyError: 
-                pass
         
         # Any fields not in the standard set are written as freeform atoms
         # (e.g. "----:com.apple.iTunes:LYRICS") which is the MP4 custom metadata convention
@@ -1038,62 +1045,76 @@ class SimpleMusic:
         
         tags = self.mfile.tags
         
-        # ID3 write strategy: delete all managed frames first, then re-add.
-        # This prevents stale data if a field is removed by the user.
-        frames_to_remove = ['TIT2', 'TALB', 'TPE1', 'TPE2', 'TCON', 'COMM', 
-                           'TDRC', 'TRCK', 'TPOS', 'TCOM']
-        for frame in frames_to_remove:
-            tags.delall(frame)
+        # ID3 write strategy: update or delete only the fields present in the input
+        # This preserves existing fields that are not part of the current update
         
-        # Remove TXXX PERFORMER frames
-        for tx in list(tags.getall('TXXX')):
-            try:
-                desc = (getattr(tx, 'desc', '') or '').strip().lower()
-                if desc in ('performer', 'performers', 'perf'):
-                    tags.delall(tx.FrameID)
-            except Exception as e:
-                logger.debug(f"Failed to remove ID3 TXXX performer frame: {e}")
-                continue
+        if 'title' in fields:
+            tags.delall('TIT2')
+            if fields['title']:
+                tags.add(id3.TIT2(encoding=3, text=fields['title']))
+        if 'album' in fields:
+            tags.delall('TALB')
+            if fields['album']:
+                tags.add(id3.TALB(encoding=3, text=fields['album']))
+        if 'artist' in fields:
+            tags.delall('TPE1')
+            if fields['artist']:
+                tags.add(id3.TPE1(encoding=3, text=fields['artist']))
+        if 'albumartist' in fields:
+            tags.delall('TPE2')
+            if fields['albumartist']:
+                tags.add(id3.TPE2(encoding=3, text=fields['albumartist']))
+        if 'genre' in fields:
+            tags.delall('TCON')
+            if fields['genre']:
+                tags.add(id3.TCON(encoding=3, text=fields['genre']))
+        if 'comment' in fields:
+            tags.delall('COMM')
+            if fields['comment']:
+                tags.add(id3.COMM(encoding=3, lang='eng', desc='', text=fields['comment']))
+        if 'composer' in fields:
+            tags.delall('TCOM')
+            if fields['composer']:
+                tags.add(id3.TCOM(encoding=3, text=fields['composer']))
         
-        # Add fields
-        if fields.get('title'):
-            tags.add(id3.TIT2(encoding=3, text=fields['title']))
-        if fields.get('album'):
-            tags.add(id3.TALB(encoding=3, text=fields['album']))
-        if fields.get('artist'):
-            tags.add(id3.TPE1(encoding=3, text=fields['artist']))
-        if fields.get('albumartist'):
-            tags.add(id3.TPE2(encoding=3, text=fields['albumartist']))
-        if fields.get('genre'):
-            tags.add(id3.TCON(encoding=3, text=fields['genre']))
-        if fields.get('comment'):
-            tags.add(id3.COMM(encoding=3, lang='eng', desc='', text=fields['comment']))
-        if fields.get('composer'):
-            tags.add(id3.TCOM(encoding=3, text=fields['composer']))
+        if 'performer' in fields:
+            # Remove TXXX PERFORMER frames
+            for tx in list(tags.getall('TXXX')):
+                try:
+                    desc = (getattr(tx, 'desc', '') or '').strip().lower()
+                    if desc in ('performer', 'performers', 'perf'):
+                        tags.delall(tx.FrameID)
+                except Exception as e:
+                    logger.debug(f"Failed to remove ID3 TXXX performer frame: {e}")
+                    continue
+            if fields['performer']:
+                try:
+                    tags.add(id3.TXXX(encoding=3, desc='PERFORMER', text=fields['performer']))
+                except Exception as e:
+                    logger.warning(f"Failed to write ID3 performer field: {e}")
+                    pass
         
-        # Performer: write as TXXX
-        if fields.get('performer'):
-            try:
-                tags.add(id3.TXXX(encoding=3, desc='PERFORMER', text=fields['performer']))
-            except Exception as e:
-                logger.warning(f"Failed to write ID3 performer field: {e}")
-                pass
-        
-        if fields.get('date'):
-            tags.add(id3.TDRC(encoding=3, text=fields['date']))
+        if 'date' in fields:
+            tags.delall('TDRC')
+            if fields['date']:
+                tags.add(id3.TDRC(encoding=3, text=fields['date']))
         
         # ID3 encodes track/disc as "N/Total" strings (e.g. "3/12")
-        if fields.get('track') or fields.get('totaltracks'):
+        if 'track' in fields or 'totaltracks' in fields:
+            tags.delall('TRCK')
             tnum = fields.get('track')[0] if fields.get('track') else ''
             ttot = fields.get('totaltracks')[0] if fields.get('totaltracks') else ''
-            trck_text = f"{tnum}/{ttot}" if ttot else str(tnum)
-            tags.add(id3.TRCK(encoding=3, text=[trck_text]))
+            if tnum or ttot:
+                trck_text = f"{tnum}/{ttot}" if ttot else str(tnum)
+                tags.add(id3.TRCK(encoding=3, text=[trck_text]))
         
-        if fields.get('disc') or fields.get('totaldiscs'):
+        if 'disc' in fields or 'totaldiscs' in fields:
+            tags.delall('TPOS')
             dnum = fields.get('disc')[0] if fields.get('disc') else ''
             dtot = fields.get('totaldiscs')[0] if fields.get('totaldiscs') else ''
-            tpos_text = f"{dnum}/{dtot}" if dtot else str(dnum)
-            tags.add(id3.TPOS(encoding=3, text=[tpos_text]))
+            if dnum or dtot:
+                tpos_text = f"{dnum}/{dtot}" if dtot else str(dnum)
+                tags.add(id3.TPOS(encoding=3, text=[tpos_text]))
             
         # Any fields not in the standard set are written as TXXX (user-defined text) frames
         known_fields = {
@@ -1140,24 +1161,33 @@ class SimpleMusic:
             else:
                 tags[key] = vals
         
-        set_or_del('title', fields.get('title', []))
-        set_or_del('artist', fields.get('artist', []))
-        set_or_del('album', fields.get('album', []))
-        set_or_del('albumartist', fields.get('albumartist', []))
-        set_or_del('genre', fields.get('genre', []))
-        set_or_del('comment', fields.get('comment', []))
-        set_or_del('composer', fields.get('composer', []))
-        set_or_del('performer', fields.get('performer', []))
-        set_or_del('date', fields.get('date', []))
+        if 'title' in fields:
+            set_or_del('title', fields['title'])
+        if 'artist' in fields:
+            set_or_del('artist', fields['artist'])
+        if 'album' in fields:
+            set_or_del('album', fields['album'])
+        if 'albumartist' in fields:
+            set_or_del('albumartist', fields['albumartist'])
+        if 'genre' in fields:
+            set_or_del('genre', fields['genre'])
+        if 'comment' in fields:
+            set_or_del('comment', fields['comment'])
+        if 'composer' in fields:
+            set_or_del('composer', fields['composer'])
+        if 'performer' in fields:
+            set_or_del('performer', fields['performer'])
+        if 'date' in fields:
+            set_or_del('date', fields['date'])
 
         # Track numbers
-        if fields.get('track') or fields.get('totaltracks'):
+        if 'track' in fields or 'totaltracks' in fields:
             tnum = fields.get('track')[0] if fields.get('track') else ''
             ttot = fields.get('totaltracks')[0] if fields.get('totaltracks') else ''
             
             if tnum:
                 tags['tracknumber'] = str(tnum)
-            else:
+            elif 'track' in fields:
                 try: 
                     del tags['tracknumber']
                 except KeyError: 
@@ -1167,7 +1197,7 @@ class SimpleMusic:
             if ttot:
                 tags['tracktotal'] = str(ttot)
                 tags['totaltracks'] = str(ttot)
-            else:
+            elif 'totaltracks' in fields:
                 try:
                     del tags['tracktotal']
                 except KeyError: 
@@ -1178,13 +1208,13 @@ class SimpleMusic:
                     pass
 
         # Disc numbers
-        if fields.get('disc') or fields.get('totaldiscs'):
+        if 'disc' in fields or 'totaldiscs' in fields:
             dnum = fields.get('disc')[0] if fields.get('disc') else ''
             dtot = fields.get('totaldiscs')[0] if fields.get('totaldiscs') else ''
             
             if dnum:
                 tags['discnumber'] = str(dnum)
-            else:
+            elif 'disc' in fields:
                 try: 
                     del tags['discnumber']
                 except KeyError: 
@@ -1193,7 +1223,7 @@ class SimpleMusic:
             if dtot:
                 tags['disctotal'] = str(dtot)
                 tags['totaldiscs'] = str(dtot)
-            else:
+            elif 'totaldiscs' in fields:
                 try:
                     del tags['disctotal']
                 except KeyError: 
@@ -1241,18 +1271,27 @@ class SimpleMusic:
             else:
                 tags[key] = vals
         
-        set_or_del('title', fields.get('title', []))
-        set_or_del('artist', fields.get('artist', []))
-        set_or_del('album', fields.get('album', []))
-        set_or_del('albumartist', fields.get('albumartist', []))
-        set_or_del('genre', fields.get('genre', []))
-        set_or_del('comment', fields.get('comment', []))
-        set_or_del('composer', fields.get('composer', []))
-        set_or_del('performer', fields.get('performer', []))
-        set_or_del('date', fields.get('date', []))
+        if 'title' in fields:
+            set_or_del('title', fields['title'])
+        if 'artist' in fields:
+            set_or_del('artist', fields['artist'])
+        if 'album' in fields:
+            set_or_del('album', fields['album'])
+        if 'albumartist' in fields:
+            set_or_del('albumartist', fields['albumartist'])
+        if 'genre' in fields:
+            set_or_del('genre', fields['genre'])
+        if 'comment' in fields:
+            set_or_del('comment', fields['comment'])
+        if 'composer' in fields:
+            set_or_del('composer', fields['composer'])
+        if 'performer' in fields:
+            set_or_del('performer', fields['performer'])
+        if 'date' in fields:
+            set_or_del('date', fields['date'])
 
         # Track numbers
-        if fields.get('track') or fields.get('totaltracks'):
+        if 'track' in fields or 'totaltracks' in fields:
             tnum = fields.get('track')[0] if fields.get('track') else ''
             ttot = fields.get('totaltracks')[0] if fields.get('totaltracks') else ''
             
@@ -1260,14 +1299,14 @@ class SimpleMusic:
                 tags['tracknumber'] = f"{tnum}/{ttot}"
             elif tnum:
                 tags['tracknumber'] = str(tnum)
-            else:
+            elif 'track' in fields:
                 try: 
                     del tags['tracknumber']
                 except KeyError: 
                     pass
 
         # Disc numbers
-        if fields.get('disc') or fields.get('totaldiscs'):
+        if 'disc' in fields or 'totaldiscs' in fields:
             dnum = fields.get('disc')[0] if fields.get('disc') else ''
             dtot = fields.get('totaldiscs')[0] if fields.get('totaldiscs') else ''
             
@@ -1275,7 +1314,7 @@ class SimpleMusic:
                 tags['discnumber'] = f"{dnum}/{dtot}"
             elif dnum:
                 tags['discnumber'] = str(dnum)
-            else:
+            elif 'disc' in fields:
                 try: 
                     del tags['discnumber']
                 except KeyError: 
@@ -1524,87 +1563,4 @@ class SimpleMusic:
                 except Exception as close_error:
                     logger.warning(f"Error during cleanup of {path}: {close_error}")
 
-class SimpleMusicTests(unittest.TestCase):
-    """Unit tests for SimpleMusic class."""
-    
-    def setUp(self):
-        """Set up test fixtures."""
-        self.test_dir = Path(tempfile.mkdtemp(prefix="mudio_test_"))
-        
-    def tearDown(self):
-        """Clean up test fixtures."""
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
-    
-    def test_parse_list_string(self):
-        """Test parse_list_string method."""
-        self.assertEqual(SimpleMusic.parse_list_string("a;b;c"), ["a", "b", "c"])
-        self.assertEqual(SimpleMusic.parse_list_string("a; b ; c"), ["a", "b", "c"])
-        self.assertEqual(SimpleMusic.parse_list_string(""), [])
-        self.assertEqual(SimpleMusic.parse_list_string(None), [])
-    
-    def test_unique_preserve_order_case_insensitive(self):
-        """Test unique_preserve_order_case_insensitive method."""
-        input_list = ["Artist", "artist", "ARTIST", "New Artist"]
-        result = SimpleMusic.unique_preserve_order_case_insensitive(input_list)
-        self.assertEqual(result, ["Artist", "New Artist"])
-    
-    def test_safe_int(self):
-        """Test safe_int method."""
-        self.assertEqual(SimpleMusic.safe_int("123"), 123)
-        self.assertEqual(SimpleMusic.safe_int(456), 456)
-        self.assertIsNone(SimpleMusic.safe_int("invalid"))
-        self.assertIsNone(SimpleMusic.safe_int(None))
-    
-    @patch('mutagen.File')
-    def test_file_loading(self, mock_mutagen):
-        """Test file loading with mutagen."""
-        mock_file = Mock()
-        mock_mutagen.return_value = mock_file
-        
-        test_file = self.test_dir / "test.mp3"
-        test_file.write_bytes(b"fake content")
-        
-        sm = SimpleMusic(test_file)
-        self.assertEqual(sm.path, test_file)
-        self.assertEqual(sm.mfile, mock_file)
-        
-        with self.assertRaises(RuntimeError):
-            SimpleMusic(self.test_dir / "nonexistent.mp3")
-    
-    def test_context_manager(self):
-        """Test context manager functionality."""
-        with patch('mutagen.File') as mock_mutagen:
-            mock_file = Mock()
-            mock_mutagen.return_value = mock_file
-            
-            test_file = self.test_dir / "test.mp3"
-            test_file.write_bytes(b"fake content")
-            
-            with SimpleMusic(test_file) as sm:
-                self.assertIsInstance(sm, SimpleMusic)
-            
-            mock_file.close.assert_called_once()
-
-    @staticmethod
-    def run_tests() -> Dict[str, Any]:
-        """Run all SimpleMusic unit tests."""
-        loader = unittest.TestLoader()
-        suite = loader.loadTestsFromTestCase(SimpleMusicTests)
-        
-        runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
-        result = runner.run(suite)
-        
-        return {
-            'tests_run': result.testsRun,
-            'failures': len(result.failures),
-            'errors': len(result.errors),
-            'successful': result.testsRun - len(result.failures) - len(result.errors)
-        }
-
 managed_simple_music = SimpleMusic.managed
-
-if __name__ == '__main__':
-    # Run tests if executed directly
-    results = SimpleMusicTests.run_tests()
-    print(f"SimpleMusic Tests: {results['successful']}/{results['tests_run']} passed")

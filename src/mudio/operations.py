@@ -5,7 +5,7 @@ Field operations and transformation logic for mudio.
 import re
 from typing import Dict, List, Tuple, Callable
 
-from .core import SimpleMusic
+from .core import SimpleMusic, MULTI_VALUE_FIELDS
 from .utils import safe_regex_pattern
 
 # ---------- Type Definitions ----------
@@ -56,14 +56,16 @@ def find_replace(field_name: str, find: str, replace: str, regex: bool = False, 
                 
             return FieldOperations.normalize_values(field_name, working_values)
 
-        # No index given — apply find/replace to every item in the field
+        # Multi-value field determination: explicit allowed list is multi-value,
+        # everything else (including custom fields) is single-value by default.
         out = []
+        is_multi = field_name.lower() in MULTI_VALUE_FIELDS
         for v in values:
             new_val = pattern.sub(replace, str(v))
             
-            # If the result contains a delimiter (e.g. ";"),
-            # split it into separate items (e.g. "Rock;Pop" -> ["Rock", "Pop"])
-            if delimiter in new_val:
+            # For multi-value fields, if the result contains a delimiter (e.g. ";"),
+            # split it into separate items. For single-value fields, keep as one string.
+            if is_multi and delimiter in new_val:
                 out.extend(SimpleMusic.parse_list_string(new_val, delimiter=delimiter))
             else:
                 out.append(new_val)
@@ -80,14 +82,18 @@ def write(field_name: str, value_str: str, delimiter: str = ';', index: int = No
     If index is provided, overwrites only that specific item.
     If value contains delimiter, splits and inserts multiple items at that index.
     """
-    # Pre-split the value for when we overwrite the entire field
-    # e.g. "Rock;Pop" with delimiter ";" becomes ["Rock", "Pop"]
-    full_overwrite_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
-
-    # Pre-split the value for when we insert at a specific index
-    if delimiter in str(value_str):
-        insert_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
+    # Multi-value field determination (lowercase comparison)
+    # Skip splitting for single-value fields to allow literal delimiters (e.g. ";" in title)
+    if field_name.lower() in MULTI_VALUE_FIELDS:
+        full_overwrite_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
+        
+        # Pre-split the value for when we insert at a specific index
+        if delimiter in str(value_str):
+            insert_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
+        else:
+            insert_vals = [str(value_str)]
     else:
+        full_overwrite_vals = [str(value_str)]
         insert_vals = [str(value_str)]
 
     def op(values: List[str]) -> List[str]:
@@ -110,7 +116,7 @@ def write(field_name: str, value_str: str, delimiter: str = ';', index: int = No
     op.field_name = field_name
     return op
 
-def append(field_name: str, value_str: str, delimiter: str = ';', index: int = None) -> Callable[[List[str]], List[str]]:
+def append(field_name: str, value_str: str, index: int = None) -> Callable[[List[str]], List[str]]:
     """
     Create an append operation that adds text to existing field values.
     If index is provided, appends only to that item.
@@ -172,8 +178,11 @@ def enlist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[L
     def op(values: List[str]) -> List[str]:
         """Add new items, deduplicating case-insensitively."""
         new_values = list(values)
-        add_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
-        
+        if field_name.lower() in MULTI_VALUE_FIELDS:
+             add_vals = SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter)
+        else:
+             add_vals = [str(value_str)]
+            
         # Only add items that don't already exist (case-insensitive comparison)
         for val in add_vals:
             val_stripped = val.strip()
@@ -219,7 +228,10 @@ def delist(field_name: str, value_str: str, delimiter: str = ';') -> Callable[[L
             return []
         
         # Build a set of values to remove (case-insensitive)
-        remove_vals = set(v.strip().lower() for v in SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter))
+        if field_name.lower() in MULTI_VALUE_FIELDS:
+            remove_vals = set(v.strip().lower() for v in SimpleMusic.parse_list_string(str(value_str), delimiter=delimiter))
+        else:
+            remove_vals = {str(value_str).strip().lower()}
         
         # Keep only items that aren't in the removal set
         new_values = []

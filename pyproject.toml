@@ -1,6 +1,6 @@
 [project]
 name = "mudio"
-version = "3.2.0"
+version = "3.3.2"
 description = "Friendly command-line music-metadata editor and Python library"
 authors = [{name = "Matthew Deik", email = "131482791+mdeik@users.noreply.github.com"}]
 license = {text = "MIT"}

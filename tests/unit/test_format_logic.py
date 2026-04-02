@@ -10,6 +10,8 @@ from mudio.utils import Config
 import mutagen.asf as asf
 import mutagen.mp4 as mp4
 import mutagen.id3 as id3
+import wave
+import mutagen.wave
 
 class TestFormatLogic(unittest.TestCase):
     """Test format-specific logic (MP4, WMA, etc)."""
@@ -181,6 +183,56 @@ class TestFormatLogic(unittest.TestCase):
         for f in txxx:
             if f.desc == 'MYKEY':
                 assert f.text == ['New Value']
+
+    # --- WAV Tag Initialization ---
+
+    def test_ensure_tags_exist_wav(self):
+        """Test that WAV files correctly get ID3 tags added."""
+        self.sm.mfile = MagicMock(spec=mutagen.wave.WAVE)
+        self.sm.mfile.tags = None
+        self.sm.path = MagicMock()
+        self.sm.path.suffix = ".wav"
+        
+        # Test addition logic
+        self.sm._ensure_tags_exist()
+        
+        # Verify add_tags was called
+        self.sm.mfile.add_tags.assert_called_once()
+
+    def test_ensure_tags_exist_fails_gracefully(self):
+        """Test error handling when tags cannot be added."""
+        self.sm.mfile = MagicMock()
+        del self.sm.mfile.tags 
+        self.sm.mfile.add_tags.side_effect = Exception("Format error")
+        self.sm.path.suffix = ".unknown"
+        
+        with pytest.raises(RuntimeError, match="Cannot add metadata tags"):
+            self.sm._ensure_tags_exist()
+
+    # --- ASF/WMA Edge Cases ---
+
+    def test_write_asf_performer_deletion(self):
+        """Test deletion of WM/Performer in ASF tags."""
+        self.sm.mfile = MagicMock(spec=asf.ASF)
+        self.sm.mfile.tags = {"WM/Performer": [asf.ASFUnicodeAttribute("Old")]}
+        
+        # Write fields with performer=None (deletion)
+        self.sm._write_asf_fields({"performer": []})
+        
+        assert "WM/Performer" not in self.sm.mfile.tags
+
+    def test_write_asf_multiple_attributes(self):
+        """Test writing multiple attributes for a single key in ASF."""
+        self.sm.mfile = MagicMock(spec=asf.ASF)
+        self.sm.mfile.tags = {}
+        
+        # Multi-value field
+        fields = {"artist": ["Artist A", "Artist B"]}
+        self.sm._write_asf_fields(fields)
+        
+        assert len(self.sm.mfile.tags["Author"]) == 2
+        assert str(self.sm.mfile.tags["Author"][0]) == "Artist A"
+        assert str(self.sm.mfile.tags["Author"][1]) == "Artist B"
 
 if __name__ == "__main__":
     unittest.main()

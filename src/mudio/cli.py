@@ -258,7 +258,7 @@ def build_operations_from_args(args: argparse.Namespace) -> Tuple[List[FieldOper
                 ops.append(find_replace(field, args.find, args.replace, regex=args.regex, delimiter=delimiter))
             # Set operation
             elif args.operation == 'append':
-                ops.append(append(field, args.value, delimiter=delimiter))
+                ops.append(append(field, args.value))
             elif args.operation == 'prefix':
                 ops.append(prefix(field, args.value))
             elif args.operation == 'enlist':

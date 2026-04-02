@@ -215,5 +215,37 @@ class TestSimpleMusic(unittest.TestCase):
             # 3. Test Deletion of non-existent field (should not error)
             sm.delete_fields(['non_existent'])
 
+    def test_write_fields_merging_behavior(self):
+        """Test that write_fields preserves existing canonical fields (merging)."""
+        with patch('mutagen.File') as mock_mutagen:
+            import mutagen.mp3
+            import mutagen.id3 as id3
+            
+            mock_file = Mock()
+            mock_file.__class__ = mutagen.mp3.MP3
+            
+            # Setup initial tags with title and artist
+            tags = id3.ID3()
+            tags.add(id3.TIT2(encoding=3, text=["Original Title"]))
+            tags.add(id3.TPE1(encoding=3, text=["Original Artist"]))
+            mock_file.tags = tags
+            mock_mutagen.return_value = mock_file
+            
+            test_file = self.test_dir / "test.mp3"
+            test_file.write_bytes(b"fake content")
+            
+            sm = SimpleMusic(test_file)
+            # Partial write: only update album
+            sm.write_fields({'album': ['New Album']})
+            
+            # Verify results
+            # Album should be added
+            self.assertEqual(tags.get('TALB').text, ['New Album'])
+            # Title and Artist should STILL BE THERE (This will currently fail)
+            self.assertIn('TIT2', tags, "Title (TIT2) was unintentionally cleared!")
+            self.assertEqual(tags.get('TIT2').text, ['Original Title'])
+            self.assertIn('TPE1', tags, "Artist (TPE1) was unintentionally cleared!")
+            self.assertEqual(tags.get('TPE1').text, ['Original Artist'])
+
 if __name__ == '__main__':
     unittest.main()

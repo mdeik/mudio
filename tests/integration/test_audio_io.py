@@ -129,7 +129,52 @@ class TestAudioIO:
             val = fields.get("title")
             assert val in [None, [], [""]], f"Expected deleted title, got {val}"
 
+    def test_partial_write_preserves_other_fields(self, audio_file):
+        """Test that writing a single field does not clear other canonical fields."""
+        initial_metadata = {
+            "title": ["Initial Title"],
+            "artist": ["Initial Artist"],
+            "album": ["Initial Album"],
+        }
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(initial_metadata)
+
+        # Partial write: only update comment
+        partial_metadata = {"comment": ["New Comment"]}
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(partial_metadata)
+
+        with SimpleMusic.managed(audio_file) as sm:
+            fields = sm.read_fields()
+            assert fields["comment"] == ["New Comment"]
+            # These should still be there (currently they will likely be [""] due to the bug)
+            assert fields["title"] == ["Initial Title"], f"Expected 'Initial Title', got {fields.get('title')}"
+            assert fields["artist"] == ["Initial Artist"], f"Expected 'Initial Artist', got {fields.get('artist')}"
+            assert fields["album"] == ["Initial Album"], f"Expected 'Initial Album', got {fields.get('album')}"
+
+    def test_partial_write_preserves_custom_fields(self, audio_file):
+        """Test that writing a canonical field preserves existing custom fields."""
+        initial_metadata = {
+            "title": ["Initial Title"],
+            "MY_CUSTOM_TAG": ["Custom Value"],
+        }
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(initial_metadata)
+
+        # Partial write: update artist (canonical)
+        partial_metadata = {"artist": ["New Artist"]}
+        with SimpleMusic.managed(audio_file) as sm:
+            sm.write_fields(partial_metadata)
+
+        with SimpleMusic.managed(audio_file) as sm:
+            fields = sm.read_fields(schema='extended')
+            assert fields["artist"] == ["New Artist"]
+            assert fields["title"] == ["Initial Title"] # This will fail due to the bug
+            # This should be preserved (it already is, but good to test)
+            assert fields.get("my_custom_tag") == ["Custom Value"]
+
     def test_read_all_formats(self, all_format_files):
+
         """Test reading metadata from all supported formats (dummy files)."""
         for file_path in all_format_files:
             try:

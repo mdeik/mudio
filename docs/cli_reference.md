@@ -56,6 +56,7 @@ Select an operation using `--operation NAME`.
 
 **`write`**
 - Multi-value: Use `--delimiter` to split (e.g., `--value "Rock;Pop"` creates two genre entries)
+- **Single-value**: Fields like `title` and `album` ignore delimiters. `--value "A;B"` is treated as a single literal string for these fields.
 - Primary operation for setting tags
 
 **`append` / `prefix`**
@@ -69,6 +70,7 @@ Select an operation using `--operation NAME`.
 **`enlist` / `delist`**
 - Case-insensitive matching
 - Adds/removes values from the field's value list
+- **Single-value**: Functions normally on the in-memory list, but only the first item (index 0) is persisted to the file.
 
 ---
 
@@ -81,28 +83,28 @@ Select which fields to operate on using the following arguments:
 
 These are the canonical field names supported across all audio formats.
 
-| Field | Description |
+| Field | Description | Type |
 | :--- | :--- |
-| `title` | Track title |
-| `artist` | Track artist |
-| `album` | Album name |
-| `albumartist` | Album artist |
-| `genre` | Genre |
-| `date` | Release date/year |
-| `comment` | Comments |
-| `track` | Track number |
-| `totaltracks` | Total tracks count |
-| `disc` | Disc number |
-| `totaldiscs` | Total discs count |
-| `composer` | Composer |
-| `performer` | Performer |
+| `title` | Track title | Single-Value |
+| `artist` | Track artist | Multi-Value |
+| `album` | Album name | Single-Value |
+| `albumartist` | Album artist | Multi-Value |
+| `genre` | Genre | Multi-Value |
+| `date` | Release date/year | Single-Value |
+| `comment` | Comments | Multi-Value |
+| `track` | Track number | Single-Value |
+| `totaltracks` | Total tracks count | Single-Value |
+| `disc` | Disc number | Single-Value |
+| `totaldiscs` | Total discs count | Single-Value |
+| `composer` | Composer | Multi-Value |
+| `performer` | Performer | Multi-Value |
 
 ### Custom Fields
 
 You are not limited to the canonical fields above. You can read and write **any** custom field supported by the underlying format.
 
 *   **Usage**: Simply use the field name in `--fields` (e.g. `--fields MY_CUSTOM_TAG`).
-*   **Multi-Value**: Custom fields are treated as multi-valued, like all other fields.
+*   **Single-Value**: Custom fields are treated as **single-valued** by default. Use semicolons as literal text.
 *   **Storage**:
     *   **MP3 (ID3)**: `TXXX:MY_CUSTOM_TAG`
     *   **FLAC/Vorbis**: `MY_CUSTOM_TAG=Value`
